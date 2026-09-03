@@ -1,5 +1,17 @@
 from pydantic import BaseModel, Field
+from enum import Enum
 
+
+class TaskStatus(str, Enum):
+    TODO = "todo"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+
+
+class TaskPriority(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 class TaskCreate(BaseModel):
     title: str = Field(min_length=3, max_length=200)
@@ -7,8 +19,8 @@ class TaskCreate(BaseModel):
         default=None,
         max_length=2000
     )
-    status: str = "todo"
-    priority: str = "medium"
+    status: TaskStatus = TaskStatus.TODO
+    priority: TaskPriority = TaskPriority.MEDIUM
     assignee_id: int | None = None
 
 class TaskUpdate(BaseModel):
@@ -23,16 +35,16 @@ class TaskUpdate(BaseModel):
         max_length=2000
     )
 
-    status: str | None = None
-    priority: str | None = None
+    status: TaskStatus | None = None
+    priority: TaskPriority | None = None
     assignee_id: int | None = None
 
 class TaskResponse(BaseModel):
     id: int
     title: str
     description: str | None
-    status: str
-    priority: str
+    status: TaskStatus
+    priority: TaskPriority
     project_id: int
     assignee_id: int | None
 
