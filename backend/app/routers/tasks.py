@@ -7,7 +7,7 @@ from app.dependencies import get_current_user
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
-from app.schemas.task import TaskCreate, TaskResponse
+from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
 
 
 router = APIRouter()
@@ -81,3 +81,94 @@ def get_tasks(
     ).all()
 
     return tasks
+
+@router.get(
+    "/tasks/{task_id}",
+    response_model=TaskResponse
+)
+def get_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    task = db.scalar(
+        select(Task)
+        .join(Project)
+        .where(
+            Task.id == task_id,
+            Project.owner_id == current_user.id
+        )
+    )
+
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
+
+    return task
+
+@router.patch(
+    "/tasks/{task_id}",
+    response_model=TaskResponse
+)
+def update_task(
+    task_id: int,
+    task_update: TaskUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    task = db.scalar(
+        select(Task)
+        .join(Project)
+        .where(
+            Task.id == task_id,
+            Project.owner_id == current_user.id
+        )
+    )
+
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
+
+    update_data = task_update.model_dump(
+        exclude_unset=True
+    )
+
+    for field, value in update_data.items():
+        setattr(task, field, value)
+
+    db.commit()
+    db.refresh(task)
+
+    return task
+
+@router.delete("/tasks/{task_id}")
+def delete_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    task = db.scalar(
+        select(Task)
+        .join(Project)
+        .where(
+            Task.id == task_id,
+            Project.owner_id == current_user.id
+        )
+    )
+
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
+
+    db.delete(task)
+    db.commit()
+
+    return {
+        "message": "Task deleted successfully"
+    }
