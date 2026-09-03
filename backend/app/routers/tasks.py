@@ -37,12 +37,22 @@ def create_task(
             detail="Project not found"
         )
 
+    if task.assignee_id is not None:
+        assignee = db.get(User, task.assignee_id)
+
+        if assignee is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Assignee not found"
+            )
+
     new_task = Task(
         title=task.title,
         description=task.description,
         status=task.status,
         priority=task.priority,
-        project_id=project_id
+        project_id=project_id,
+        assignee_id=task.assignee_id
     )
 
     db.add(new_task)
@@ -137,6 +147,21 @@ def update_task(
         exclude_unset=True
     )
 
+    if (
+        "assignee_id" in update_data
+        and update_data["assignee_id"] is not None
+    ):
+        assignee = db.get(
+            User,
+            update_data["assignee_id"]
+        )
+
+        if assignee is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Assignee not found"
+            )
+        
     for field, value in update_data.items():
         setattr(task, field, value)
 
