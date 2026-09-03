@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -7,11 +7,29 @@ from app.dependencies import get_current_user
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
-from app.schemas.task import TaskCreate, TaskResponse, TaskUpdate
-
+from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse, TaskStatus, TaskPriority
 
 router = APIRouter()
 
+@router.get("/tasks/search", response_model=list[TaskResponse])
+def search_tasks(
+    q: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    tasks = db.scalars(
+        select(Task)
+        .join(Project)
+        .where(
+            Project.owner_id == current_user.id,
+            or_(
+                Task.title.ilike(f"%{q}%"),
+                Task.description.ilike(f"%{q}%")
+            )
+        )
+    ).all()
+
+    return tasks
 
 @router.post(
     "/projects/{project_id}/tasks",
@@ -68,6 +86,9 @@ def create_task(
 )
 def get_tasks(
     project_id: int,
+    status: TaskStatus | None = None,
+    priority: TaskPriority | None = None,
+    assignee_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -84,11 +105,20 @@ def get_tasks(
             detail="Project not found"
         )
 
-    tasks = db.scalars(
-        select(Task).where(
-            Task.project_id == project_id
-        )
-    ).all()
+    query = select(Task).where(
+        Task.project_id == project_id
+    )
+
+    if status is not None:
+        query = query.where(Task.status == status.value)
+
+    if priority is not None:
+        query = query.where(Task.priority == priority.value)
+
+    if assignee_id is not None:
+        query = query.where(Task.assignee_id == assignee_id)
+
+    tasks = db.scalars(query).all()
 
     return tasks
 
