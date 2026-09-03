@@ -1,13 +1,16 @@
 from fastapi import FastAPI
 from app.models.user import User
 from app.models.project import Project
+from app.models.task import Task
+
 from app.database import Base, engine
-from app.routers import projects, users
+from app.routers import projects, users, tasks
 
 app = FastAPI()
 
 app.include_router(projects.router)
 app.include_router(users.router)
+app.include_router(tasks.router)
 
 @app.get("/")
 def home():
