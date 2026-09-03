@@ -13,6 +13,12 @@ class TaskPriority(str, Enum):
     MEDIUM = "medium"
     HIGH = "high"
 
+class TaskSortField(str, Enum):
+    ID = "id"
+    TITLE = "title"
+    PRIORITY = "priority"
+    STATUS = "status"
+    
 class TaskCreate(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     description: str | None = Field(

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
@@ -7,7 +7,7 @@ from app.dependencies import get_current_user
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
-from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse, TaskStatus, TaskPriority
+from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse, TaskStatus, TaskPriority, TaskSortField
 
 router = APIRouter()
 
@@ -89,6 +89,10 @@ def get_tasks(
     status: TaskStatus | None = None,
     priority: TaskPriority | None = None,
     assignee_id: int | None = None,
+    sort_by: TaskSortField = TaskSortField.ID,
+    descending: bool = False,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -117,6 +121,21 @@ def get_tasks(
 
     if assignee_id is not None:
         query = query.where(Task.assignee_id == assignee_id)
+
+    sort_column = {
+        TaskSortField.ID: Task.id,
+        TaskSortField.TITLE: Task.title,
+        TaskSortField.PRIORITY: Task.priority,
+        TaskSortField.STATUS: Task.status
+    }[sort_by]
+
+    if descending:
+        query = query.order_by(sort_column.desc())
+    else:
+        query = query.order_by(sort_column.asc())
+
+    offset = (page - 1) * limit
+    query = query.offset(offset).limit(limit)
 
     tasks = db.scalars(query).all()
 
