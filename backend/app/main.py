@@ -7,7 +7,7 @@ from app.models.activity_log import ActivityLog
 from app.models.notification import Notification
 
 from app.database import Base, engine
-from app.routers import projects, users, tasks, comments, notifications
+from app.routers import projects, users, tasks, comments, notifications, dashboard
 
 app = FastAPI()
 
@@ -16,6 +16,7 @@ app.include_router(users.router)
 app.include_router(tasks.router)
 app.include_router(comments.router)
 app.include_router(notifications.router)
+app.include_router(dashboard.router)
 
 @app.get("/")
 def home():
