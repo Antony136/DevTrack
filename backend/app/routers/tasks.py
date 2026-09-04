@@ -8,6 +8,9 @@ from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
 from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse, TaskStatus, TaskPriority, TaskSortField
+from app.utils.activity import create_activity_log
+from app.utils.notification import create_notification
+from app.models.activity_log import ActivityLog
 
 router = APIRouter()
 
@@ -74,6 +77,16 @@ def create_task(
     )
 
     db.add(new_task)
+    db.flush()
+
+    create_activity_log(
+        db=db,
+        user_id=current_user.id,
+        action="task_created",
+        description=f'Task "{new_task.title}" was created',
+        task_id=new_task.id
+    )
+
     db.commit()
     db.refresh(new_task)
 
@@ -192,6 +205,10 @@ def update_task(
             detail="Task not found"
         )
 
+    old_status = task.status
+    old_priority = task.priority
+    old_assignee_id = task.assignee_id
+
     update_data = task_update.model_dump(
         exclude_unset=True
     )
@@ -212,7 +229,57 @@ def update_task(
             )
         
     for field, value in update_data.items():
+        if field in {"status", "priority"} and value is not None:
+            value = value.value
         setattr(task, field, value)
+
+    if (
+        "assignee_id" in update_data
+        and old_assignee_id != task.assignee_id
+        and task.assignee_id is not None
+    ):
+        create_notification(
+            db=db,
+            user_id=task.assignee_id,
+            message=f'You were assigned to task "{task.title}"',
+            notification_type="task_assigned"
+        )
+        
+    if "status" in update_data:
+        create_activity_log(
+            db=db,
+            user_id=current_user.id,
+            action="status_changed",
+            description=(
+                f'Task "{task.title}" status changed '
+                f"from {old_status} to {task.status}"
+            ),
+            task_id=task.id
+        )
+
+    if "priority" in update_data:
+        create_activity_log(
+            db=db,
+            user_id=current_user.id,
+            action="priority_changed",
+            description=(
+                f'Task "{task.title}" priority changed '
+                f"from {old_priority} to {task.priority}"
+            ),
+            task_id=task.id
+        )
+
+    if "assignee_id" in update_data:
+        create_activity_log(
+            db=db,
+            user_id=current_user.id,
+            action="assignee_changed",
+            description=(
+                f'Task "{task.title}" assignee changed '
+                f"from {old_assignee_id} to {task.assignee_id}"
+            ),
+            task_id=task.id
+        )
 
     db.commit()
     db.refresh(task)
@@ -246,3 +313,4 @@ def delete_task(
     return {
         "message": "Task deleted successfully"
     }
+
