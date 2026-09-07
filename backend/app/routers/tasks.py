@@ -7,7 +7,16 @@ from app.dependencies import get_current_user
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
-from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse, TaskStatus, TaskPriority, TaskSortField
+from app.schemas.task import (
+    TaskCreate,
+    TaskUpdate,
+    TaskResponse,
+    TaskStatus,
+    TaskPriority,
+    TaskSortField
+)
+
+from app.schemas.activity import ActivityLogResponse
 from app.utils.activity import create_activity_log
 from app.utils.notification import create_notification
 from app.models.activity_log import ActivityLog
@@ -87,6 +96,13 @@ def create_task(
         task_id=new_task.id
     )
 
+    if new_task.assignee_id is not None:
+        create_notification(
+            db=db,
+            user_id=new_task.assignee_id,
+            message=f'You were assigned to task "{new_task.title}"',
+            notification_type="task_assigned"
+        )
     db.commit()
     db.refresh(new_task)
 
@@ -153,6 +169,38 @@ def get_tasks(
     tasks = db.scalars(query).all()
 
     return tasks
+
+@router.get(
+    "/tasks/{task_id}/activity",
+    response_model=list[ActivityLogResponse]
+)
+def get_task_activity(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    task = db.scalar(
+        select(Task)
+        .join(Project)
+        .where(
+            Task.id == task_id,
+            Project.owner_id == current_user.id
+        )
+    )
+
+    if not task:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
+
+    activities = db.scalars(
+        select(ActivityLog)
+        .where(ActivityLog.task_id == task_id)
+        .order_by(ActivityLog.created_at.desc())
+    ).all()
+
+    return activities
 
 @router.get(
     "/tasks/{task_id}",

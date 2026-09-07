@@ -99,3 +99,38 @@ def project(client, auth_headers):
     assert response.status_code == 201
 
     return response.json()
+
+@pytest.fixture
+def second_user(client):
+    response = client.post(
+        "/users",
+        json={
+            "username": "seconduser",
+            "email": "second@example.com",
+            "password": "password123"
+        }
+    )
+
+    assert response.status_code == 201
+
+    user = response.json()
+
+    login_response = client.post(
+        "/login",
+        json={
+            "username": "seconduser",
+            "password": "password123"
+        }
+    )
+
+    assert login_response.status_code == 200
+
+    token = login_response.json()["access_token"]
+
+    return {
+        "user": user,
+        "token": token,
+        "headers": {
+            "Authorization": f"Bearer {token}"
+        }
+    }
