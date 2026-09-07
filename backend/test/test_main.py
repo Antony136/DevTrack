@@ -941,3 +941,133 @@ def test_user_cannot_mark_another_users_notification_as_read(
     )
 
     assert response.status_code == 404
+
+
+def test_dashboard_counts(client, auth_headers, project):
+    # Create TODO + LOW + unassigned
+    response = client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Todo Task",
+            "status": "todo",
+            "priority": "low"
+        }
+    )
+
+    assert response.status_code == 201
+
+    # Create IN_PROGRESS + MEDIUM
+    response = client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=auth_headers,
+        json={
+            "title": "In Progress Task",
+            "status": "in_progress",
+            "priority": "medium"
+        }
+    )
+
+    assert response.status_code == 201
+
+    # Create DONE + HIGH
+    response = client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Done Task",
+            "status": "done",
+            "priority": "high"
+        }
+    )
+
+    assert response.status_code == 201
+
+    response = client.get(
+        "/dashboard",
+        headers=auth_headers
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total_projects"] == 1
+    assert data["total_tasks"] == 3
+
+    assert data["todo_tasks"] == 1
+    assert data["in_progress_tasks"] == 1
+    assert data["done_tasks"] == 1
+
+    assert data["low_priority_tasks"] == 1
+    assert data["medium_priority_tasks"] == 1
+    assert data["high_priority_tasks"] == 1
+
+    assert data["unassigned_tasks"] == 3
+
+def test_dashboard_only_counts_current_user(
+    client,
+    auth_headers,
+    project,
+    second_user
+):
+    # Current user's project/task
+    response = client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=auth_headers,
+        json={
+            "title": "My Task",
+            "status": "todo",
+            "priority": "low"
+        }
+    )
+
+    assert response.status_code == 201
+
+    # Second user's project
+    response = client.post(
+        "/projects",
+        headers=second_user["headers"],
+        json={
+            "name": "Other Project",
+            "description": "Another user's project"
+        }
+    )
+
+    assert response.status_code == 201
+
+    other_project = response.json()
+
+    # Second user's task
+    response = client.post(
+        f"/projects/{other_project['id']}/tasks",
+        headers=second_user["headers"],
+        json={
+            "title": "Other Task",
+            "status": "done",
+            "priority": "high"
+        }
+    )
+
+    assert response.status_code == 201
+
+    # Check dashboard as first user
+    response = client.get(
+        "/dashboard",
+        headers=auth_headers
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total_projects"] == 1
+    assert data["total_tasks"] == 1
+
+    assert data["todo_tasks"] == 1
+    assert data["in_progress_tasks"] == 0
+    assert data["done_tasks"] == 0
+
+    assert data["low_priority_tasks"] == 1
+    assert data["medium_priority_tasks"] == 0
+    assert data["high_priority_tasks"] == 0
