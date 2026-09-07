@@ -84,3 +84,18 @@ def auth_headers(auth_token):
     return {
         "Authorization": f"Bearer {auth_token}"
     }
+
+@pytest.fixture
+def project(client, auth_headers):
+    response = client.post(
+        "/projects",
+        headers=auth_headers,
+        json={
+            "name": "Test Project",
+            "description": "Project for task tests"
+        }
+    )
+
+    assert response.status_code == 201
+
+    return response.json()

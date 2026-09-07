@@ -22,7 +22,7 @@ class ActivityLog(Base):
     )
 
     task_id: Mapped[int | None] = mapped_column(
-        ForeignKey("tasks.id"),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
         nullable=True
     )
 
