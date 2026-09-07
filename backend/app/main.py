@@ -22,5 +22,5 @@ app.include_router(dashboard.router)
 def home():
     return {"message": "DevTrack API"}
 
-Base.metadata.create_all(bind=engine)
+# Base.metadata.create_all(bind=engine)
 
