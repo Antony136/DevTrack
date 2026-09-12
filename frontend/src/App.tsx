@@ -1,8 +1,8 @@
 import {
   BrowserRouter,
-  Routes,
-  Route,
   Navigate,
+  Route,
+  Routes,
 } from "react-router-dom"
 
 import Login from "./pages/Login"
@@ -27,6 +27,8 @@ function App() {
           <Route path="/projects/:projectId/tasks" element={<Tasks />} />
           <Route path="/tasks" element={<Tasks />} />
         </Route>
+
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
   )

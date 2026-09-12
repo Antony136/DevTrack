@@ -11,7 +11,6 @@ function Tasks() {
 
   const [title, setTitle] = useState("")
   const [description, setDescription] = useState("")
-
   const [status, setStatus] = useState<TaskStatus>("todo")
   const [priority, setPriority] = useState<TaskPriority>("medium")
 
@@ -19,7 +18,6 @@ function Tasks() {
   const [error, setError] = useState("")
 
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null)
-
   const [editTitle, setEditTitle] = useState("")
   const [editDescription, setEditDescription] = useState("")
   const [editStatus, setEditStatus] = useState<TaskStatus>("todo")
@@ -34,9 +32,7 @@ function Tasks() {
       const response = await api.get("/users")
       setUsers(response.data)
     } catch (error: any) {
-      setError(
-        error.response?.data?.detail || "Failed to load users"
-      )
+      setError(error.response?.data?.detail || "Failed to load users")
     }
   }
 
@@ -50,9 +46,7 @@ function Tasks() {
 
       setTasks(response.data)
     } catch (error: any) {
-      setError(
-        error.response?.data?.detail || "Failed to load tasks"
-      )
+      setError(error.response?.data?.detail || "Failed to load tasks")
     } finally {
       setLoading(false)
     }
@@ -89,15 +83,12 @@ function Tasks() {
 
       await fetchTasks()
     } catch (error: any) {
-      setError(
-        error.response?.data?.detail || "Failed to create task"
-      )
+      setError(error.response?.data?.detail || "Failed to create task")
     }
   }
 
   const startEditing = (task: Task) => {
     setEditingTaskId(task.id)
-
     setEditTitle(task.title)
     setEditDescription(task.description || "")
     setEditStatus(task.status)
@@ -117,33 +108,25 @@ function Tasks() {
 
       setTasks((currentTasks) =>
         currentTasks.map((task) =>
-          task.id === taskId
-            ? response.data
-            : task
+          task.id === taskId ? response.data : task
         )
       )
 
       setEditingTaskId(null)
     } catch (error: any) {
-      setError(
-        error.response?.data?.detail || "Failed to update task"
-      )
+      setError(error.response?.data?.detail || "Failed to update task")
     }
   }
-  
+
   const handleDeleteTask = async (taskId: number) => {
     try {
       await api.delete(`/tasks/${taskId}`)
 
       setTasks((currentTasks) =>
-        currentTasks.filter(
-          (task) => task.id !== taskId
-        )
+        currentTasks.filter((task) => task.id !== taskId)
       )
     } catch (error: any) {
-      setError(
-        error.response?.data?.detail || "Failed to delete task"
-      )
+      setError(error.response?.data?.detail || "Failed to delete task")
     }
   }
 
@@ -210,9 +193,7 @@ function Tasks() {
           ))}
         </select>
 
-        <button type="submit">
-          Create Task
-        </button>
+        <button type="submit">Create Task</button>
       </form>
 
       <hr />
@@ -247,23 +228,6 @@ function Tasks() {
                     setEditStatus(e.target.value as TaskStatus)
                   }
                 >
-                  <select
-                    value={editAssigneeId ?? ""}
-                    onChange={(e) =>
-                      setEditAssigneeId(
-                        e.target.value ? Number(e.target.value) : null
-                      )
-                    }
-                  >
-                    <option value="">Unassigned</option>
-
-                    {users.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.username}
-                      </option>
-                    ))}
-                  </select>
-
                   <option value="todo">Todo</option>
                   <option value="in_progress">In Progress</option>
                   <option value="done">Done</option>
@@ -278,6 +242,23 @@ function Tasks() {
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
+                </select>
+
+                <select
+                  value={editAssigneeId ?? ""}
+                  onChange={(e) =>
+                    setEditAssigneeId(
+                      e.target.value ? Number(e.target.value) : null
+                    )
+                  }
+                >
+                  <option value="">Unassigned</option>
+
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.username}
+                    </option>
+                  ))}
                 </select>
 
                 <button onClick={() => handleUpdateTask(task.id)}>
@@ -300,7 +281,9 @@ function Tasks() {
                 <p>
                   Assignee:{" "}
                   {task.assignee_id
-                    ? users.find((user) => user.id === task.assignee_id)?.username
+                    ? users.find(
+                        (user) => user.id === task.assignee_id
+                      )?.username || "Unknown user"
                     : "Unassigned"}
                 </p>
 
