@@ -1,154 +1,276 @@
 import {
   type FormEvent,
+  useCallback,
   useEffect,
+  useMemo,
   useState,
 } from "react"
-import { useParams } from "react-router-dom"
+import { Link, useNavigate, useParams } from "react-router-dom"
+import Icon from "../components/Icon"
+import TaskCard from "../components/TaskCard"
+import Toast from "../components/Toast"
 import api from "../services/api"
+import { type Project } from "../types/project"
 import {
   type Task,
   type TaskPriority,
+  type TaskSortField,
   type TaskStatus,
+  type TaskUpdate,
 } from "../types/task"
 import { type User } from "../types/user"
+import { getErrorMessage, isUnauthorized } from "../utils/errors"
+
+const pageSize = 9
+const statusOptions: TaskStatus[] = ["todo", "in_progress", "done"]
+const priorityOptions: TaskPriority[] = ["low", "medium", "high"]
+
+interface TaskDraft {
+  projectId: string
+  title: string
+  description: string
+  status: TaskStatus
+  priority: TaskPriority
+  assigneeId: string
+}
+
+const emptyDraft: TaskDraft = {
+  projectId: "",
+  title: "",
+  description: "",
+  status: "todo",
+  priority: "medium",
+  assigneeId: "",
+}
+
+const priorityRank: Record<TaskPriority, number> = {
+  low: 1,
+  medium: 2,
+  high: 3,
+}
 
 function Tasks() {
   const { projectId } = useParams()
+  const navigate = useNavigate()
 
   const [tasks, setTasks] = useState<Task[]>([])
   const [users, setUsers] = useState<User[]>([])
-
-  const [taskTitle, setTaskTitle] = useState("")
-  const [taskDescription, setTaskDescription] = useState("")
-  const [taskStatus, setTaskStatus] = useState<TaskStatus>("todo")
-  const [taskPriority, setTaskPriority] = useState<TaskPriority>("medium")
-  const [taskAssignee, setTaskAssignee] = useState<number | "">("")
-
-  const [editingTaskId, setEditingTaskId] = useState<number | null>(null)
-  const [editTitle, setEditTitle] = useState("")
-  const [editDescription, setEditDescription] = useState("")
-  const [editStatus, setEditStatus] = useState<TaskStatus>("todo")
-  const [editPriority, setEditPriority] = useState<TaskPriority>("medium")
-  const [editAssignee, setEditAssignee] = useState<number | "">("")
-
+  const [projects, setProjects] = useState<Project[]>([])
+  const [draft, setDraft] = useState<TaskDraft>(emptyDraft)
+  const [editDraft, setEditDraft] = useState<TaskDraft>(emptyDraft)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [taskToDelete, setTaskToDelete] = useState<Task | null>(null)
   const [search, setSearch] = useState("")
+  const [debouncedSearch, setDebouncedSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "">("")
   const [priorityFilter, setPriorityFilter] = useState<TaskPriority | "">("")
-  const [assigneeFilter, setAssigneeFilter] = useState<number | "">("")
-
-  const [sortBy, setSortBy] = useState("created_at")
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("")
+  const [sortBy, setSortBy] = useState<TaskSortField>("id")
   const [descending, setDescending] = useState(true)
-
   const [page, setPage] = useState(1)
-  const limit = 9
-  const [totalTasks, setTotalTasks] = useState(0)
-
+  const [knownTotal, setKnownTotal] = useState<number | null>(null)
+  const [hasNextPage, setHasNextPage] = useState(false)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
-  const [deletingId, setDeletingId] = useState<number | null>(null)
   const [savingId, setSavingId] = useState<number | null>(null)
-
+  const [deletingId, setDeletingId] = useState<number | null>(null)
   const [error, setError] = useState("")
-  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [toast, setToast] = useState("")
+  const [showCreateModal, setShowCreateModal] = useState(false)
 
-  const getErrorMessage = (error: any, fallback: string) => {
-    const detail = error.response?.data?.detail
+  const numericProjectId = projectId ? Number(projectId) : null
+  const project = projects.find((item) => item.id === numericProjectId)
+  const searchQuery = debouncedSearch.trim()
+  const useClientQuery = !numericProjectId || searchQuery.length > 0
 
-    if (typeof detail === "string") {
-      return detail
-    }
+  const sortTasks = useCallback(
+    (items: Task[]) => {
+      return [...items].sort((a, b) => {
+        const comparison =
+          sortBy === "title"
+            ? a.title.localeCompare(b.title)
+            : sortBy === "priority"
+              ? priorityRank[a.priority] - priorityRank[b.priority]
+              : sortBy === "status"
+                ? a.status.localeCompare(b.status)
+                : a.id - b.id
 
-    if (Array.isArray(detail)) {
-      return detail
-        .map((item) => item?.msg || "Invalid request")
-        .join(", ")
-    }
+        return descending ? -comparison : comparison
+      })
+    },
+    [descending, sortBy],
+  )
 
-    return fallback
-  }
+  const applyClientFilters = useCallback(
+    (items: Task[]) => {
+      const assigneeId = assigneeFilter ? Number(assigneeFilter) : null
 
-  const fetchUsers = async () => {
+      return items.filter((task) => {
+        if (numericProjectId && task.project_id !== numericProjectId) {
+          return false
+        }
+
+        if (statusFilter && task.status !== statusFilter) {
+          return false
+        }
+
+        if (priorityFilter && task.priority !== priorityFilter) {
+          return false
+        }
+
+        if (assigneeId !== null && task.assignee_id !== assigneeId) {
+          return false
+        }
+
+        return true
+      })
+    },
+    [assigneeFilter, numericProjectId, priorityFilter, statusFilter],
+  )
+
+  const handleUnauthorized = useCallback(
+    (error: unknown) => {
+      if (isUnauthorized(error)) {
+        navigate("/login", { replace: true })
+        return true
+      }
+
+      return false
+    },
+    [navigate],
+  )
+
+  const fetchReferences = useCallback(async () => {
     try {
-      const response = await api.get("/users")
-      setUsers(response.data)
-    } catch (error) {
-      console.error("Failed to fetch users", error)
-    }
-  }
+      const [usersResponse, projectsResponse] = await Promise.all([
+        api.get<User[]>("/users"),
+        api.get<Project[]>("/projects"),
+      ])
 
-  const fetchTasks = async () => {
+      setUsers(usersResponse.data)
+      setProjects(projectsResponse.data)
+    } catch (error) {
+      if (!handleUnauthorized(error)) {
+        setError(getErrorMessage(error, "Failed to load workspace data."))
+      }
+    }
+  }, [handleUnauthorized])
+
+  const fetchTasks = useCallback(async () => {
     try {
       setLoading(true)
       setError("")
 
-      let response
-
-      if (projectId) {
-        const params = {
-          status: statusFilter || undefined,
-          priority: priorityFilter || undefined,
-          assignee_id: assigneeFilter === "" ? undefined : assigneeFilter,
-          page,
-          limit,
-        }
-
-        response = await api.get(`/projects/${projectId}/tasks`, { params })
-
-        const receivedTasks = response.data.items || response.data
-        setTasks(receivedTasks)
-
-        setTotalTasks(
-          response.data.total ??
-          receivedTasks.length ??
-          0
-        )
-      } else {
-        response = await api.get("/tasks/search", {
-          params: {
-            q: search || undefined,
-          },
+      if (useClientQuery) {
+        const response = await api.get<Task[]>("/tasks/search", {
+          params: { q: searchQuery },
         })
+        const filtered = applyClientFilters(response.data)
+        const sorted = sortTasks(filtered)
+        const start = (page - 1) * pageSize
+        const pageItems = sorted.slice(start, start + pageSize)
+
+        setTasks(pageItems)
+        setKnownTotal(sorted.length)
+        setHasNextPage(start + pageSize < sorted.length)
+      } else {
+        const response = await api.get<Task[]>(
+          `/projects/${numericProjectId}/tasks`,
+          {
+            params: {
+              status: statusFilter || undefined,
+              priority: priorityFilter || undefined,
+              assignee_id: assigneeFilter || undefined,
+              sort_by: sortBy,
+              descending,
+              page,
+              limit: pageSize,
+            },
+          },
+        )
 
         setTasks(response.data)
-        setTotalTasks(response.data.length)
+        setKnownTotal(null)
+        setHasNextPage(response.data.length === pageSize)
       }
-    } catch (error: any) {
-      if (error.response?.status === 401) {
-        localStorage.removeItem("token")
-        window.location.href = "/login"
-        return
+    } catch (error) {
+      if (!handleUnauthorized(error)) {
+        setError(getErrorMessage(error, "Failed to load tasks."))
       }
-
-      setError(getErrorMessage(error, "Failed to load tasks"))
     } finally {
       setLoading(false)
     }
-  }
+  }, [
+    applyClientFilters,
+    assigneeFilter,
+    descending,
+    handleUnauthorized,
+    numericProjectId,
+    page,
+    priorityFilter,
+    searchQuery,
+    sortBy,
+    sortTasks,
+    statusFilter,
+    useClientQuery,
+  ])
 
   useEffect(() => {
-    fetchUsers()
-  }, [])
+    fetchReferences()
+  }, [fetchReferences])
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setDebouncedSearch(search)
+    }, 250)
+
+    return () => window.clearTimeout(timeout)
+  }, [search])
 
   useEffect(() => {
     fetchTasks()
-  }, [
-    projectId,
-    statusFilter,
-    priorityFilter,
-    assigneeFilter,
-    page,
-  ])
+  }, [fetchTasks])
 
-  const handleCreateTask = async (e: FormEvent) => {
-    e.preventDefault()
+  const resetDraft = () => {
+    setDraft({
+      ...emptyDraft,
+      projectId: numericProjectId ? String(numericProjectId) : "",
+    })
+  }
 
-    if (!projectId) {
-      setError("Select a project before creating a task.")
+  const clearFilters = () => {
+    setSearch("")
+    setDebouncedSearch("")
+    setStatusFilter("")
+    setPriorityFilter("")
+    setAssigneeFilter("")
+    setSortBy("id")
+    setDescending(true)
+    setPage(1)
+  }
+
+  const taskPayloadFromDraft = (currentDraft: TaskDraft): TaskUpdate => ({
+    title: currentDraft.title.trim(),
+    description: currentDraft.description.trim() || null,
+    status: currentDraft.status,
+    priority: currentDraft.priority,
+    assignee_id: currentDraft.assigneeId ? Number(currentDraft.assigneeId) : null,
+  })
+
+  const handleCreateTask = async (event: FormEvent) => {
+    event.preventDefault()
+
+    const selectedProjectId = numericProjectId
+      ? String(numericProjectId)
+      : draft.projectId
+
+    if (!selectedProjectId) {
+      setError("Choose a project before creating a task.")
       return
     }
 
-    if (!taskTitle.trim()) {
-      setError("Task title is required")
+    if (draft.title.trim().length < 3) {
+      setError("Task title must be at least 3 characters.")
       return
     }
 
@@ -156,445 +278,245 @@ function Tasks() {
       setCreating(true)
       setError("")
 
-      await api.post(`/projects/${projectId}/tasks`, {
-        title: taskTitle.trim(),
-        description: taskDescription.trim() || null,
-        status: taskStatus,
-        priority: taskPriority,
-        assignee_id: taskAssignee === "" ? null : taskAssignee,
+      await api.post(`/projects/${selectedProjectId}/tasks`, {
+        ...taskPayloadFromDraft(draft),
       })
 
-      setTaskTitle("")
-      setTaskDescription("")
-      setTaskStatus("todo")
-      setTaskPriority("medium")
-      setTaskAssignee("")
-      setShowCreateForm(false)
+      resetDraft()
+      setShowCreateModal(false)
       setPage(1)
-
+      setToast("Task created.")
       await fetchTasks()
-    } catch (error: any) {
-      setError(getErrorMessage(error, "Failed to create task"))
+      window.dispatchEvent(new Event("devtrack:notifications-changed"))
+    } catch (error) {
+      setError(getErrorMessage(error, "Failed to create task."))
     } finally {
       setCreating(false)
     }
   }
 
-  const startEditing = (task: Task) => {
-    setEditingTaskId(task.id)
-    setEditTitle(task.title)
-    setEditDescription(task.description || "")
-    setEditStatus(task.status)
-    setEditPriority(task.priority)
-    setEditAssignee(task.assignee_id ?? "")
+  const openEditModal = (task: Task) => {
+    setEditingTask(task)
+    setEditDraft({
+      projectId: String(task.project_id),
+      title: task.title,
+      description: task.description || "",
+      status: task.status,
+      priority: task.priority,
+      assigneeId: task.assignee_id ? String(task.assignee_id) : "",
+    })
     setError("")
   }
 
-  const cancelEditing = () => {
-    setEditingTaskId(null)
-    setEditTitle("")
-    setEditDescription("")
-    setEditStatus("todo")
-    setEditPriority("medium")
-    setEditAssignee("")
-  }
+  const handleUpdateTask = async (event: FormEvent) => {
+    event.preventDefault()
 
-  const handleUpdateTask = async (taskId: number) => {
-    if (!editTitle.trim()) {
-      setError("Task title is required")
+    if (!editingTask) {
+      return
+    }
+
+    if (editDraft.title.trim().length < 3) {
+      setError("Task title must be at least 3 characters.")
       return
     }
 
     try {
-      setSavingId(taskId)
+      setSavingId(editingTask.id)
       setError("")
 
-      await api.patch(`/tasks/${taskId}`, {
-        title: editTitle.trim(),
-        description: editDescription.trim() || null,
-        status: editStatus,
-        priority: editPriority,
-        assignee_id: editAssignee === "" ? null : editAssignee,
-      })
+      await api.patch(`/tasks/${editingTask.id}`, taskPayloadFromDraft(editDraft))
 
-      cancelEditing()
+      setEditingTask(null)
+      setToast("Task updated.")
       await fetchTasks()
-    } catch (error: any) {
-      setError(getErrorMessage(error, "Failed to update task"))
+      window.dispatchEvent(new Event("devtrack:notifications-changed"))
+    } catch (error) {
+      setError(getErrorMessage(error, "Failed to update task."))
     } finally {
       setSavingId(null)
     }
   }
 
-  const handleDeleteTask = async (taskId: number) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this task?"
-    )
-
-    if (!confirmed) {
+  const handleQuickStatusChange = async (task: Task, status: TaskStatus) => {
+    if (status === task.status) {
       return
     }
 
     try {
-      setDeletingId(taskId)
+      setSavingId(task.id)
       setError("")
 
-      await api.delete(`/tasks/${taskId}`)
+      const response = await api.patch<Task>(`/tasks/${task.id}`, { status })
 
-      const remainingTasks = tasks.filter(
-        (task) => task.id !== taskId
+      setTasks((currentTasks) =>
+        currentTasks.map((currentTask) =>
+          currentTask.id === task.id ? response.data : currentTask,
+        ),
       )
+      setToast("Task status updated.")
+    } catch (error) {
+      setError(getErrorMessage(error, "Failed to update task status."))
+    } finally {
+      setSavingId(null)
+    }
+  }
 
-      setTasks(remainingTasks)
-      setTotalTasks((current) => Math.max(0, current - 1))
+  const handleDeleteTask = async () => {
+    if (!taskToDelete) {
+      return
+    }
 
-      if (remainingTasks.length === 0 && page > 1) {
-        setPage((current) => current - 1)
-      }
-    } catch (error: any) {
-      setError(getErrorMessage(error, "Failed to delete task"))
+    try {
+      setDeletingId(taskToDelete.id)
+      setError("")
+
+      await api.delete(`/tasks/${taskToDelete.id}`)
+
+      setTaskToDelete(null)
+      setToast("Task deleted.")
+      await fetchTasks()
+    } catch (error) {
+      setError(getErrorMessage(error, "Failed to delete task."))
     } finally {
       setDeletingId(null)
     }
   }
 
-  const handleQuickStatusChange = async (
-    task: Task,
-    status: TaskStatus
-  ) => {
-    try {
-      setSavingId(task.id)
-      setError("")
-
-      await api.patch(`/tasks/${task.id}`, { status })
-
-      setTasks((currentTasks) =>
-        currentTasks.map((currentTask) =>
-          currentTask.id === task.id
-            ? { ...currentTask, status }
-            : currentTask
-        )
-      )
-    } catch (error: any) {
-      setError(
-        getErrorMessage(error, "Failed to update task status")
-      )
-    } finally {
-      setSavingId(null)
-    }
-  }
-
-  const handleSearch = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    setSearch(e.target.value)
-    setPage(1)
-  }
-
-  const clearFilters = () => {
-    setSearch("")
-    setStatusFilter("")
-    setPriorityFilter("")
-    setAssigneeFilter("")
-    setSortBy("created_at")
-    setDescending(true)
-    setPage(1)
-  }
-
-  const getUserName = (
-    userId: number | null | undefined
-  ) => {
-    if (!userId) {
-      return "Unassigned"
+  const totalPages = useMemo(() => {
+    if (knownTotal === null) {
+      return null
     }
 
-    const user = users.find((item) => item.id === userId)
-    return user?.username || "Unknown user"
-  }
+    return Math.max(1, Math.ceil(knownTotal / pageSize))
+  }, [knownTotal])
 
-  const getInitial = (
-    userId: number | null | undefined
-  ) => {
-    const name = getUserName(userId)
+  const hasFilters =
+    Boolean(search) ||
+    Boolean(statusFilter) ||
+    Boolean(priorityFilter) ||
+    Boolean(assigneeFilter)
 
-    return name === "Unassigned"
-      ? "?"
-      : name.charAt(0).toUpperCase()
-  }
-
-  const formatStatus = (status: TaskStatus) => {
-    return status
-      .replace("_", " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase())
-  }
-
-  const formatPriority = (priority: TaskPriority) => {
-    return priority.charAt(0).toUpperCase() + priority.slice(1)
-  }
-
-  const filteredTasks = tasks.filter((task) => {
-    if (!search.trim()) {
-      return true
-    }
-
-    const query = search.toLowerCase()
-
-    return (
-      task.title.toLowerCase().includes(query) ||
-      task.description?.toLowerCase().includes(query)
-    )
-  })
-
-  const sortedTasks = [...filteredTasks].sort((a, b) => {
-    let comparison = 0
-
-    if (sortBy === "title") {
-      comparison = a.title.localeCompare(b.title)
-    } else if (sortBy === "priority") {
-      const priorityOrder = {
-        low: 1,
-        medium: 2,
-        high: 3,
-      }
-
-      comparison =
-        priorityOrder[a.priority] -
-        priorityOrder[b.priority]
-    } else if (sortBy === "status") {
-      comparison = a.status.localeCompare(b.status)
-    } else {
-      comparison = a.id - b.id
-    }
-
-    return descending ? -comparison : comparison
-  })
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil(totalTasks / limit)
-  )
+  const emptyTitle = hasFilters ? "No matching tasks" : "No tasks yet"
+  const emptyDescription = hasFilters
+    ? "Try changing your search or filters."
+    : numericProjectId
+      ? "Create the first task for this project."
+      : "Create a project task to start tracking work."
 
   return (
     <div className="page">
       <div className="page-container">
         <header className="page-header">
           <div className="page-header-content">
-            <h1>{projectId ? "Project Tasks" : "All Tasks"}</h1>
+            <p className="eyebrow">{numericProjectId ? "Project" : "Workspace"}</p>
+            <h1>{project?.name || (numericProjectId ? "Project Tasks" : "All Tasks")}</h1>
             <p>
-              Plan, organize, and track your development work.
+              {numericProjectId
+                ? "Plan and manage work inside this project."
+                : "Search and manage tasks across your projects."}
             </p>
           </div>
 
-          {projectId && (
+          <div className="page-actions">
+            {numericProjectId && (
+              <Link className="btn-secondary" to="/projects">
+                <Icon name="arrow-left" />
+                Projects
+              </Link>
+            )}
+
             <button
               className="btn-primary"
-              onClick={() =>
-                setShowCreateForm((current) => !current)
-              }
+              onClick={() => {
+                resetDraft()
+                setShowCreateModal(true)
+                setError("")
+              }}
+              type="button"
+              disabled={!numericProjectId && projects.length === 0}
             >
-              {showCreateForm ? "Cancel" : "+ New Task"}
+              <Icon name="plus" />
+              New Task
             </button>
-          )}
+          </div>
         </header>
 
-        {error && (
-          <div className="error-message tasks-error">
-            {error}
-          </div>
-        )}
+        {error && <div className="error-message tasks-error">{error}</div>}
 
-        {showCreateForm && projectId && (
-          <section className="card create-task-card">
-            <div className="card-header">
-              <div>
-                <h3>Create a new task</h3>
-                <p className="text-muted">
-                  Add a task and assign it to a team member.
-                </p>
-              </div>
-            </div>
-
-            <div className="card-body">
-              <form
-                className="task-form"
-                onSubmit={handleCreateTask}
-              >
-                <div className="task-form-grid">
-                  <div className="form-group task-form-title">
-                    <label htmlFor="task-title">Title</label>
-                    <input
-                      id="task-title"
-                      type="text"
-                      placeholder="What needs to be done?"
-                      value={taskTitle}
-                      onChange={(e) => setTaskTitle(e.target.value)}
-                      maxLength={150}
-                      autoFocus
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label htmlFor="task-priority">Priority</label>
-                    <select
-                      id="task-priority"
-                      value={taskPriority}
-                      onChange={(e) =>
-                        setTaskPriority(
-                          e.target.value as TaskPriority
-                        )
-                      }
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label htmlFor="task-status">Status</label>
-                    <select
-                      id="task-status"
-                      value={taskStatus}
-                      onChange={(e) =>
-                        setTaskStatus(
-                          e.target.value as TaskStatus
-                        )
-                      }
-                    >
-                      <option value="todo">To Do</option>
-                      <option value="in_progress">
-                        In Progress
-                      </option>
-                      <option value="done">Done</option>
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label htmlFor="task-assignee">Assignee</label>
-                    <select
-                      id="task-assignee"
-                      value={taskAssignee}
-                      onChange={(e) =>
-                        setTaskAssignee(
-                          e.target.value
-                            ? Number(e.target.value)
-                            : ""
-                        )
-                      }
-                    >
-                      <option value="">Unassigned</option>
-
-                      {users.map((user) => (
-                        <option key={user.id} value={user.id}>
-                          {user.username}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="task-description">
-                    Description
-                  </label>
-
-                  <textarea
-                    id="task-description"
-                    placeholder="Add some context about this task..."
-                    value={taskDescription}
-                    onChange={(e) =>
-                      setTaskDescription(e.target.value)
-                    }
-                    rows={3}
-                    maxLength={1000}
-                  />
-                </div>
-
-                <div className="task-form-actions">
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      setShowCreateForm(false)
-                      setTaskTitle("")
-                      setTaskDescription("")
-                    }}
-                  >
-                    Cancel
-                  </button>
-
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={creating}
-                  >
-                    {creating ? "Creating..." : "Create Task"}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </section>
-        )}
-
-        <section className="task-toolbar card">
+        <section className="task-toolbar">
           <div className="task-search">
-            <span>⌕</span>
-
+            <Icon name="search" />
             <input
-              type="text"
+              type="search"
               placeholder="Search tasks..."
               value={search}
-              onChange={handleSearch}
-            />
-          </div>
-
-          <div className="task-filters">
-            <select
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(
-                  e.target.value as TaskStatus | ""
-                )
+              onChange={(event) => {
+                setSearch(event.target.value)
                 setPage(1)
               }}
-              aria-label="Filter by status"
-            >
-              <option value="">All Statuses</option>
-              <option value="todo">To Do</option>
-              <option value="in_progress">In Progress</option>
-              <option value="done">Done</option>
-            </select>
+              aria-label="Search tasks"
+            />
+            {search && (
+              <button
+                className="task-search-clear"
+                type="button"
+                onClick={() => {
+                  setSearch("")
+                  setDebouncedSearch("")
+                  setPage(1)
+                }}
+                aria-label="Clear search"
+              >
+                <Icon name="close" />
+              </button>
+            )}
+          </div>
+
+          <div className="task-filters" aria-label="Task filters">
+            <label className="select-with-icon">
+              <Icon name="filter" />
+              <select
+                value={statusFilter}
+                onChange={(event) => {
+                  setStatusFilter(event.target.value as TaskStatus | "")
+                  setPage(1)
+                }}
+                aria-label="Filter by status"
+              >
+                <option value="">All statuses</option>
+                {statusOptions.map((status) => (
+                  <option value={status} key={status}>
+                    {status.replace("_", " ")}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             <select
               value={priorityFilter}
-              onChange={(e) => {
-                setPriorityFilter(
-                  e.target.value as TaskPriority | ""
-                )
+              onChange={(event) => {
+                setPriorityFilter(event.target.value as TaskPriority | "")
                 setPage(1)
               }}
               aria-label="Filter by priority"
             >
-              <option value="">All Priorities</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
+              <option value="">All priorities</option>
+              {priorityOptions.map((priority) => (
+                <option value={priority} key={priority}>
+                  {priority}
+                </option>
+              ))}
             </select>
 
             <select
               value={assigneeFilter}
-              onChange={(e) => {
-                setAssigneeFilter(
-                  e.target.value
-                    ? Number(e.target.value)
-                    : ""
-                )
+              onChange={(event) => {
+                setAssigneeFilter(event.target.value)
                 setPage(1)
               }}
               aria-label="Filter by assignee"
             >
-              <option value="">All Assignees</option>
-
+              <option value="">All assignees</option>
               {users.map((user) => (
                 <option key={user.id} value={user.id}>
                   {user.username}
@@ -602,401 +524,409 @@ function Tasks() {
               ))}
             </select>
 
-            <select
-              value={`${sortBy}-${descending}`}
-              onChange={(e) => {
-                const [field, direction] =
-                  e.target.value.split("-")
-
-                setSortBy(field)
-                setDescending(direction === "true")
-                setPage(1)
-              }}
-              aria-label="Sort tasks"
-            >
-              <option value="created_at-true">Newest</option>
-              <option value="created_at-false">Oldest</option>
-              <option value="title-false">Title A-Z</option>
-              <option value="title-true">Title Z-A</option>
-              <option value="priority-true">
-                Priority High-Low
-              </option>
-              <option value="priority-false">
-                Priority Low-High
-              </option>
-            </select>
-
-            {(statusFilter ||
-              priorityFilter ||
-              assigneeFilter !== "" ||
-              search) && (
-              <button
-                className="clear-filters"
-                onClick={clearFilters}
+            <label className="select-with-icon">
+              <Icon name="sort" />
+              <select
+                value={`${sortBy}:${descending ? "desc" : "asc"}`}
+                onChange={(event) => {
+                  const [field, direction] = event.target.value.split(":")
+                  setSortBy(field as TaskSortField)
+                  setDescending(direction === "desc")
+                  setPage(1)
+                }}
+                aria-label="Sort tasks"
               >
-                Clear
+                <option value="id:desc">ID newest</option>
+                <option value="id:asc">ID oldest</option>
+                <option value="title:asc">Title A-Z</option>
+                <option value="title:desc">Title Z-A</option>
+                <option value="priority:desc">Priority high first</option>
+                <option value="priority:asc">Priority low first</option>
+                <option value="status:asc">Status A-Z</option>
+              </select>
+            </label>
+
+            {hasFilters && (
+              <button className="clear-filters" onClick={clearFilters} type="button">
+                Clear filters
               </button>
             )}
           </div>
         </section>
 
-        <section className="tasks-section">
-          <div className="section-heading">
-            <div>
-              <h2>
-                {totalTasks}{" "}
-                {totalTasks === 1 ? "Task" : "Tasks"}
-              </h2>
+        <section className="section-heading">
+          <div>
+            <h2>{knownTotal === null ? "Tasks" : `${knownTotal} Tasks`}</h2>
+            <p>
+              {knownTotal === null
+                ? `Showing ${tasks.length} task${tasks.length === 1 ? "" : "s"} on page ${page}`
+                : `Showing page ${page} of ${totalPages}`}
+            </p>
+          </div>
 
-              <p>
-                {projectId
-                  ? "Tasks in this project"
-                  : "Tasks matching your search"}
-              </p>
+          <button
+            className="btn-secondary"
+            onClick={fetchTasks}
+            type="button"
+            disabled={loading}
+          >
+            <Icon name="refresh" />
+            Refresh
+          </button>
+        </section>
+
+        {loading ? (
+          <div className="tasks-grid">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div className="skeleton skeleton-task" key={index} />
+            ))}
+          </div>
+        ) : tasks.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">
+              <Icon name="tasks" />
+            </div>
+            <h3>{emptyTitle}</h3>
+            <p>{emptyDescription}</p>
+            {hasFilters ? (
+              <button className="btn-secondary" onClick={clearFilters} type="button">
+                Clear filters
+              </button>
+            ) : (
+              <button
+                className="btn-primary"
+                onClick={() => setShowCreateModal(true)}
+                type="button"
+                disabled={!numericProjectId && projects.length === 0}
+              >
+                <Icon name="plus" />
+                Create Task
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="tasks-grid">
+            {tasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                users={users}
+                onEdit={openEditModal}
+                onDelete={setTaskToDelete}
+                onStatusChange={handleQuickStatusChange}
+                saving={savingId === task.id}
+                deleting={deletingId === task.id}
+              />
+            ))}
+          </div>
+        )}
+
+        {(page > 1 || hasNextPage || (totalPages !== null && totalPages > 1)) && (
+          <nav className="pagination" aria-label="Task pagination">
+            <button
+              className="pagination-button"
+              disabled={page === 1 || loading}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              type="button"
+            >
+              <Icon name="chevron-left" />
+              Previous
+            </button>
+
+            {totalPages !== null ? (
+              <div className="pagination-pages">
+                {Array.from({ length: totalPages }, (_, index) => index + 1)
+                  .slice(Math.max(0, page - 3), page + 2)
+                  .map((pageNumber) => (
+                    <button
+                      key={pageNumber}
+                      className={`pagination-number ${
+                        page === pageNumber ? "active" : ""
+                      }`}
+                      onClick={() => setPage(pageNumber)}
+                      type="button"
+                    >
+                      {pageNumber}
+                    </button>
+                  ))}
+              </div>
+            ) : (
+              <span className="pagination-current">Page {page}</span>
+            )}
+
+            <button
+              className="pagination-button"
+              disabled={loading || (totalPages !== null ? page >= totalPages : !hasNextPage)}
+              onClick={() => setPage((current) => current + 1)}
+              type="button"
+            >
+              Next
+              <Icon name="chevron-right" />
+            </button>
+          </nav>
+        )}
+      </div>
+
+      {showCreateModal && (
+        <TaskModal
+          title="Create task"
+          draft={draft}
+          projects={projects}
+          users={users}
+          projectLocked={Boolean(numericProjectId)}
+          submitting={creating}
+          submitLabel="Create Task"
+          onChange={setDraft}
+          onSubmit={handleCreateTask}
+          onClose={() => {
+            if (!creating) {
+              setShowCreateModal(false)
+              resetDraft()
+            }
+          }}
+        />
+      )}
+
+      {editingTask && (
+        <TaskModal
+          title={`Edit task #${editingTask.id}`}
+          draft={editDraft}
+          projects={projects}
+          users={users}
+          projectLocked
+          submitting={savingId === editingTask.id}
+          submitLabel="Save Changes"
+          onChange={setEditDraft}
+          onSubmit={handleUpdateTask}
+          onClose={() => {
+            if (savingId !== editingTask.id) {
+              setEditingTask(null)
+            }
+          }}
+        />
+      )}
+
+      {taskToDelete && (
+        <div className="modal-overlay" role="presentation">
+          <section className="modal confirm-modal" role="dialog" aria-modal="true">
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow danger-text">Delete task</p>
+                <h2>{taskToDelete.title}</h2>
+              </div>
+            </div>
+
+            <p>This task will be permanently removed.</p>
+
+            <div className="modal-footer">
+              <button
+                className="btn-secondary"
+                type="button"
+                onClick={() => setTaskToDelete(null)}
+                disabled={deletingId === taskToDelete.id}
+              >
+                Cancel
+              </button>
+
+              <button
+                className="btn-danger"
+                type="button"
+                onClick={handleDeleteTask}
+                disabled={deletingId === taskToDelete.id}
+              >
+                {deletingId === taskToDelete.id && (
+                  <span className="button-spinner" />
+                )}
+                {deletingId === taskToDelete.id ? "Deleting" : "Delete"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      <Toast message={toast} onDismiss={() => setToast("")} />
+    </div>
+  )
+}
+
+interface TaskModalProps {
+  title: string
+  draft: TaskDraft
+  projects: Project[]
+  users: User[]
+  projectLocked: boolean
+  submitting: boolean
+  submitLabel: string
+  onChange: (draft: TaskDraft) => void
+  onSubmit: (event: FormEvent) => void
+  onClose: () => void
+}
+
+function TaskModal({
+  title,
+  draft,
+  projects,
+  users,
+  projectLocked,
+  submitting,
+  submitLabel,
+  onChange,
+  onSubmit,
+  onClose,
+}: TaskModalProps) {
+  const updateDraft = (updates: Partial<TaskDraft>) => {
+    onChange({ ...draft, ...updates })
+  }
+
+  return (
+    <div
+      className="modal-overlay"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !submitting) {
+          onClose()
+        }
+      }}
+    >
+      <section className="modal task-modal" role="dialog" aria-modal="true">
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">Task</p>
+            <h2>{title}</h2>
+          </div>
+
+          <button
+            className="icon-button"
+            onClick={onClose}
+            disabled={submitting}
+            type="button"
+            aria-label="Close"
+          >
+            <Icon name="close" />
+          </button>
+        </div>
+
+        <form onSubmit={onSubmit}>
+          <div className="form-group">
+            <label htmlFor="task-project">Project</label>
+            <select
+              id="task-project"
+              value={draft.projectId}
+              onChange={(event) => updateDraft({ projectId: event.target.value })}
+              disabled={projectLocked || submitting}
+              required
+            >
+              <option value="">Choose project</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="task-title">Title</label>
+            <input
+              id="task-title"
+              value={draft.title}
+              onChange={(event) => updateDraft({ title: event.target.value })}
+              placeholder="Implement authentication"
+              minLength={3}
+              maxLength={200}
+              disabled={submitting}
+              autoFocus
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="task-description">Description</label>
+            <textarea
+              id="task-description"
+              value={draft.description}
+              onChange={(event) =>
+                updateDraft({ description: event.target.value })
+              }
+              placeholder="Add implementation details, constraints, or context."
+              maxLength={2000}
+              rows={5}
+              disabled={submitting}
+            />
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label htmlFor="task-status">Status</label>
+              <select
+                id="task-status"
+                value={draft.status}
+                onChange={(event) =>
+                  updateDraft({ status: event.target.value as TaskStatus })
+                }
+                disabled={submitting}
+              >
+                <option value="todo">To Do</option>
+                <option value="in_progress">In Progress</option>
+                <option value="done">Done</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="task-priority">Priority</label>
+              <select
+                id="task-priority"
+                value={draft.priority}
+                onChange={(event) =>
+                  updateDraft({ priority: event.target.value as TaskPriority })
+                }
+                disabled={submitting}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
             </div>
           </div>
 
-          {loading ? (
-            <div className="tasks-loading">
-              <div className="loading">Loading tasks...</div>
-            </div>
-          ) : sortedTasks.length === 0 ? (
-            <div className="card empty-tasks">
-              <div className="empty-state">
-                <div className="empty-icon">✓</div>
+          <div className="form-group">
+            <label htmlFor="task-assignee">Assignee</label>
+            <select
+              id="task-assignee"
+              value={draft.assigneeId}
+              onChange={(event) => updateDraft({ assigneeId: event.target.value })}
+              disabled={submitting}
+            >
+              <option value="">Unassigned</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.username}
+                </option>
+              ))}
+            </select>
+          </div>
 
-                <h3>
-                  {search ||
-                  statusFilter ||
-                  priorityFilter ||
-                  assigneeFilter !== ""
-                    ? "No matching tasks"
-                    : "No tasks yet"}
-                </h3>
+          <div className="modal-footer">
+            <button
+              className="btn-secondary"
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+            >
+              Cancel
+            </button>
 
-                <p>
-                  {search ||
-                  statusFilter ||
-                  priorityFilter ||
-                  assigneeFilter !== ""
-                    ? "Try changing your search or filters."
-                    : "Create your first task to start tracking your work."}
-                </p>
-
-                {(search ||
-                  statusFilter ||
-                  priorityFilter ||
-                  assigneeFilter !== "") && (
-                  <button
-                    className="btn-secondary"
-                    onClick={clearFilters}
-                  >
-                    Clear Filters
-                  </button>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="tasks-grid">
-              {sortedTasks.map((task) => {
-                const isEditing = editingTaskId === task.id
-
-                return (
-                  <article
-                    className={`task-card card ${
-                      isEditing ? "task-card-editing" : ""
-                    }`}
-                    key={task.id}
-                  >
-                    {isEditing ? (
-                      <div className="card-body task-edit-body">
-                        <div className="task-edit-header">
-                          <span>
-                            Editing Task #{task.id}
-                          </span>
-
-                          <button
-                            className="icon-button"
-                            onClick={cancelEditing}
-                            aria-label="Cancel editing"
-                          >
-                            ×
-                          </button>
-                        </div>
-
-                        <div className="form-group">
-                          <label>Title</label>
-
-                          <input
-                            value={editTitle}
-                            onChange={(e) =>
-                              setEditTitle(e.target.value)
-                            }
-                          />
-                        </div>
-
-                        <div className="form-group">
-                          <label>Description</label>
-
-                          <textarea
-                            value={editDescription}
-                            onChange={(e) =>
-                              setEditDescription(
-                                e.target.value
-                              )
-                            }
-                            rows={4}
-                          />
-                        </div>
-
-                        <div className="edit-fields">
-                          <div className="form-group">
-                            <label>Status</label>
-
-                            <select
-                              value={editStatus}
-                              onChange={(e) =>
-                                setEditStatus(
-                                  e.target.value as TaskStatus
-                                )
-                              }
-                            >
-                              <option value="todo">
-                                To Do
-                              </option>
-                              <option value="in_progress">
-                                In Progress
-                              </option>
-                              <option value="done">
-                                Done
-                              </option>
-                            </select>
-                          </div>
-
-                          <div className="form-group">
-                            <label>Priority</label>
-
-                            <select
-                              value={editPriority}
-                              onChange={(e) =>
-                                setEditPriority(
-                                  e.target.value as TaskPriority
-                                )
-                              }
-                            >
-                              <option value="low">
-                                Low
-                              </option>
-                              <option value="medium">
-                                Medium
-                              </option>
-                              <option value="high">
-                                High
-                              </option>
-                            </select>
-                          </div>
-
-                          <div className="form-group">
-                            <label>Assignee</label>
-
-                            <select
-                              value={editAssignee}
-                              onChange={(e) =>
-                                setEditAssignee(
-                                  e.target.value
-                                    ? Number(e.target.value)
-                                    : ""
-                                )
-                              }
-                            >
-                              <option value="">
-                                Unassigned
-                              </option>
-
-                              {users.map((user) => (
-                                <option
-                                  key={user.id}
-                                  value={user.id}
-                                >
-                                  {user.username}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-
-                        <div className="task-edit-actions">
-                          <button
-                            className="btn-secondary"
-                            onClick={cancelEditing}
-                          >
-                            Cancel
-                          </button>
-
-                          <button
-                            className="btn-primary"
-                            onClick={() =>
-                              handleUpdateTask(task.id)
-                            }
-                            disabled={savingId === task.id}
-                          >
-                            {savingId === task.id
-                              ? "Saving..."
-                              : "Save Changes"}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="card-body">
-                        <div className="task-card-top">
-                          <span
-                            className={`priority-badge priority-${task.priority}`}
-                          >
-                            {formatPriority(task.priority)}
-                          </span>
-
-                          <span className="task-id">
-                            #{task.id}
-                          </span>
-                        </div>
-
-                        <div className="task-card-content">
-                          <h3>{task.title}</h3>
-
-                          <p>
-                            {task.description ||
-                              "No description provided."}
-                          </p>
-                        </div>
-
-                        <div className="task-meta">
-                          <div className="task-assignee">
-                            <div className="avatar avatar-sm">
-                              {getInitial(task.assignee_id)}
-                            </div>
-
-                            <span>
-                              {getUserName(
-                                task.assignee_id
-                              )}
-                            </span>
-                          </div>
-
-                          <select
-                            className={`status-select status-${task.status}`}
-                            value={task.status}
-                            onChange={(e) =>
-                              handleQuickStatusChange(
-                                task,
-                                e.target.value as TaskStatus
-                              )
-                            }
-                            disabled={savingId === task.id}
-                            aria-label="Task status"
-                          >
-                            <option value="todo">
-                              To Do
-                            </option>
-                            <option value="in_progress">
-                              In Progress
-                            </option>
-                            <option value="done">
-                              Done
-                            </option>
-                          </select>
-                        </div>
-
-                        <div className="task-card-footer">
-                          <span className="task-status-label">
-                            {formatStatus(task.status)}
-                          </span>
-
-                          <div className="task-actions">
-                            <button
-                              className="btn-small"
-                              onClick={() =>
-                                startEditing(task)
-                              }
-                              disabled={
-                                savingId === task.id ||
-                                deletingId === task.id
-                              }
-                            >
-                              Edit
-                            </button>
-
-                            <button
-                              className="btn-small btn-danger-small"
-                              onClick={() =>
-                                handleDeleteTask(task.id)
-                              }
-                              disabled={
-                                deletingId === task.id
-                              }
-                            >
-                              {deletingId === task.id
-                                ? "..."
-                                : "Delete"}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </article>
-                )
-              })}
-            </div>
-          )}
-
-          {totalPages > 1 && (
-            <div className="pagination">
-              <button
-                className="pagination-button"
-                disabled={page === 1}
-                onClick={() =>
-                  setPage((current) =>
-                    Math.max(1, current - 1)
-                  )
-                }
-              >
-                ← Previous
-              </button>
-
-              <div className="pagination-pages">
-                {Array.from(
-                  { length: totalPages },
-                  (_, index) => index + 1
-                ).map((pageNumber) => (
-                  <button
-                    key={pageNumber}
-                    className={`pagination-number ${
-                      page === pageNumber ? "active" : ""
-                    }`}
-                    onClick={() => setPage(pageNumber)}
-                  >
-                    {pageNumber}
-                  </button>
-                ))}
-              </div>
-
-              <button
-                className="pagination-button"
-                disabled={page === totalPages}
-                onClick={() =>
-                  setPage((current) =>
-                    Math.min(
-                      totalPages,
-                      current + 1
-                    )
-                  )
-                }
-              >
-                Next →
-              </button>
-            </div>
-          )}
-        </section>
-      </div>
+            <button
+              className="btn-primary"
+              type="submit"
+              disabled={submitting || draft.title.trim().length < 3}
+            >
+              {submitting && <span className="button-spinner" />}
+              {submitting ? "Saving" : submitLabel}
+            </button>
+          </div>
+        </form>
+      </section>
     </div>
   )
 }

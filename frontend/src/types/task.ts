@@ -19,3 +19,13 @@ export interface TaskCreate {
   priority?: TaskPriority
   assignee_id?: number | null
 }
+
+export type TaskSortField = "id" | "title" | "priority" | "status"
+
+export interface TaskUpdate {
+  title?: string
+  description?: string | null
+  status?: TaskStatus
+  priority?: TaskPriority
+  assignee_id?: number | null
+}

@@ -1,6 +1,8 @@
-import { useState } from "react"
+import { type FormEvent, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
+import Icon from "../components/Icon"
 import api from "../services/api"
+import { getErrorMessage } from "../utils/errors"
 
 function Register() {
   const navigate = useNavigate()
@@ -11,21 +13,33 @@ function Register() {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault()
-
+  const validate = () => {
     if (!username.trim() || !email.trim() || !password) {
-      setError("Please fill in all fields")
-      return
+      return "Fill in all fields to create your account."
     }
 
     if (username.trim().length < 3) {
-      setError("Username must be at least 3 characters")
-      return
+      return "Username must be at least 3 characters."
+    }
+
+    if (!email.includes("@")) {
+      return "Enter a valid email address."
     }
 
     if (password.length < 8) {
-      setError("Password must be at least 8 characters")
+      return "Password must be at least 8 characters."
+    }
+
+    return ""
+  }
+
+  const handleRegister = async (event: FormEvent) => {
+    event.preventDefault()
+
+    const validationError = validate()
+
+    if (validationError) {
+      setError(validationError)
       return
     }
 
@@ -34,16 +48,14 @@ function Register() {
       setLoading(true)
 
       await api.post("/users", {
-        username,
-        email,
+        username: username.trim(),
+        email: email.trim(),
         password,
       })
 
-      navigate("/login")
-    } catch (error: any) {
-      setError(
-        error.response?.data?.detail || "Registration failed"
-      )
+      navigate("/login", { replace: true })
+    } catch (error) {
+      setError(getErrorMessage(error, "Registration failed."))
     } finally {
       setLoading(false)
     }
@@ -51,9 +63,11 @@ function Register() {
 
   return (
     <main className="auth-page">
-      <div className="auth-card">
-        <div className="auth-brand">
-          <div className="auth-logo">D</div>
+      <section className="auth-card" aria-labelledby="register-title">
+        <div className="brand-lockup auth-brand">
+          <div className="brand-mark">
+            <Icon name="spark" />
+          </div>
 
           <div>
             <h1>DevTrack</h1>
@@ -62,62 +76,70 @@ function Register() {
         </div>
 
         <div className="auth-heading">
-          <h2>Create your account</h2>
-          <p>Start organizing your projects and tasks.</p>
+          <p className="eyebrow">Start focused</p>
+          <h2 id="register-title">Create your account</h2>
+          <p>Set up a workspace for projects, tasks, and assignments.</p>
         </div>
 
-        {error && (
-          <div className="error-message">
-            {error}
-          </div>
-        )}
+        {error && <div className="error-message">{error}</div>}
 
-        <form onSubmit={handleRegister} className="auth-form">
+        <form onSubmit={handleRegister} className="auth-form" noValidate>
           <div className="form-group">
             <label htmlFor="username">Username</label>
-
             <input
               id="username"
               type="text"
-              placeholder="Choose a username"
+              placeholder="antony"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(event) => setUsername(event.target.value)}
               autoComplete="username"
+              disabled={loading}
+              minLength={3}
+              maxLength={50}
+              required
             />
           </div>
 
           <div className="form-group">
             <label htmlFor="email">Email</label>
-
             <input
               id="email"
               type="email"
-              placeholder="Enter your email"
+              placeholder="you@example.com"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(event) => setEmail(event.target.value)}
               autoComplete="email"
+              disabled={loading}
+              required
             />
           </div>
 
           <div className="form-group">
             <label htmlFor="password">Password</label>
-
             <input
               id="password"
               type="password"
-              placeholder="Create a password"
+              placeholder="At least 8 characters"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
               autoComplete="new-password"
+              disabled={loading}
+              minLength={8}
+              maxLength={72}
+              required
             />
+            <p className="field-hint">Use 8 to 72 characters.</p>
           </div>
 
           <button
             type="submit"
             className="auth-submit"
-            disabled={loading}
+            disabled={
+              loading || !username.trim() || !email.trim() || !password
+            }
           >
-            {loading ? "Creating account..." : "Create account"}
+            {loading && <span className="button-spinner" />}
+            {loading ? "Creating account" : "Create account"}
           </button>
         </form>
 
@@ -125,7 +147,7 @@ function Register() {
           <span>Already have an account?</span>
           <Link to="/login">Sign in</Link>
         </div>
-      </div>
+      </section>
     </main>
   )
 }

@@ -7,5 +7,5 @@ export interface Project {
 
 export interface ProjectCreate {
   name: string
-  description?: string
+  description?: string | null
 }

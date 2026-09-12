@@ -1,23 +1,17 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import Icon, { type IconName } from "../components/Icon"
 import api from "../services/api"
+import { type DashboardStats } from "../types/dashboard"
+import { type User } from "../types/user"
+import { getErrorMessage, isUnauthorized } from "../utils/errors"
+import { initialsFromName } from "../utils/format"
 
-interface User {
-  id: number
-  username: string
-  email: string
-}
-
-interface DashboardStats {
-  total_projects: number
-  total_tasks: number
-  todo_tasks: number
-  in_progress_tasks: number
-  done_tasks: number
-  low_priority_tasks: number
-  medium_priority_tasks: number
-  high_priority_tasks: number
-  unassigned_tasks: number
+interface StatCard {
+  label: string
+  value: number
+  description: string
+  icon: IconName
 }
 
 function Dashboard() {
@@ -28,416 +22,279 @@ function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
-  useEffect(() => {
-    const fetchDashboard = async () => {
-      try {
-        setLoading(true)
-        setError("")
+  const fetchDashboard = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError("")
 
-        const [userResponse, dashboardResponse] = await Promise.all([
-          api.get("/me"),
-          api.get("/dashboard"),
-        ])
+      const [userResponse, dashboardResponse] = await Promise.all([
+        api.get<User>("/me"),
+        api.get<DashboardStats>("/dashboard"),
+      ])
 
-        setUser(userResponse.data)
-        setStats(dashboardResponse.data)
-      } catch (error: any) {
-        console.error("Failed to load dashboard", error)
-
-        if (error.response?.status === 401) {
-          localStorage.removeItem("token")
-          navigate("/login", { replace: true })
-          return
-        }
-
-        setError(
-          error.response?.data?.detail ||
-          "Failed to load dashboard"
-        )
-      } finally {
-        setLoading(false)
+      setUser(userResponse.data)
+      setStats(dashboardResponse.data)
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        navigate("/login", { replace: true })
+        return
       }
-    }
 
-    fetchDashboard()
+      setError(getErrorMessage(error, "Failed to load dashboard."))
+    } finally {
+      setLoading(false)
+    }
   }, [navigate])
 
-  if (loading) {
-    return (
-      <div className="page">
-        <div className="page-container">
-          <div className="loading">
-            Loading dashboard...
-          </div>
-        </div>
-      </div>
-    )
-  }
+  useEffect(() => {
+    fetchDashboard()
+  }, [fetchDashboard])
 
-  if (error) {
-    return (
-      <div className="page">
-        <div className="page-container">
-          <div className="error-message">
-            {error}
-          </div>
-
-          <button
-            className="btn-primary"
-            onClick={() => window.location.reload()}
-          >
-            Try Again
-          </button>
-        </div>
-      </div>
-    )
-  }
-
+  const totalTasks = stats?.total_tasks ?? 0
   const completionRate =
-    stats && stats.total_tasks > 0
-      ? Math.round(
-          (stats.done_tasks / stats.total_tasks) * 100
-        )
+    stats && totalTasks > 0
+      ? Math.round((stats.done_tasks / totalTasks) * 100)
       : 0
+
+  const statCards: StatCard[] = [
+    {
+      label: "Projects",
+      value: stats?.total_projects ?? 0,
+      description: "Active workspaces",
+      icon: "folder",
+    },
+    {
+      label: "Tasks",
+      value: totalTasks,
+      description: "Across owned projects",
+      icon: "tasks",
+    },
+    {
+      label: "In Progress",
+      value: stats?.in_progress_tasks ?? 0,
+      description: "Currently moving",
+      icon: "refresh",
+    },
+    {
+      label: "Completed",
+      value: stats?.done_tasks ?? 0,
+      description: `${completionRate}% completion rate`,
+      icon: "check",
+    },
+  ]
+
+  const progressRows = [
+    {
+      label: "To Do",
+      value: stats?.todo_tasks ?? 0,
+      className: "progress-todo",
+    },
+    {
+      label: "In Progress",
+      value: stats?.in_progress_tasks ?? 0,
+      className: "progress-in-progress",
+    },
+    {
+      label: "Done",
+      value: stats?.done_tasks ?? 0,
+      className: "progress-done",
+    },
+  ]
+
+  const priorityRows = [
+    { label: "Low", value: stats?.low_priority_tasks ?? 0, tone: "low" },
+    {
+      label: "Medium",
+      value: stats?.medium_priority_tasks ?? 0,
+      tone: "medium",
+    },
+    { label: "High", value: stats?.high_priority_tasks ?? 0, tone: "high" },
+    {
+      label: "Unassigned",
+      value: stats?.unassigned_tasks ?? 0,
+      tone: "unassigned",
+    },
+  ]
 
   return (
     <div className="page">
       <div className="page-container">
-
         <header className="page-header">
           <div className="page-header-content">
+            <p className="eyebrow">Overview</p>
             <h1>Dashboard</h1>
-            <p>
-              Your development workspace at a glance.
-            </p>
+            <p>Your development workspace at a glance.</p>
           </div>
 
           <button
             className="btn-primary"
             onClick={() => navigate("/projects")}
+            type="button"
           >
-            + New Project
+            <Icon name="plus" />
+            New Project
           </button>
         </header>
 
-        <section className="dashboard-welcome card">
-          <div className="card-body">
+        {error && (
+          <div className="state-panel error-panel">
             <div>
-              <p className="dashboard-label">
-                Welcome back
-              </p>
-
-              <h2>
-                {user?.username || "Developer"} 👋
-              </h2>
-
-              <p className="dashboard-email">
-                {user?.email}
-              </p>
+              <h3>Dashboard could not load</h3>
+              <p>{error}</p>
             </div>
+            <button className="btn-secondary" onClick={fetchDashboard}>
+              <Icon name="refresh" />
+              Retry
+            </button>
+          </div>
+        )}
 
-            <div className="avatar avatar-lg">
-              {user?.username?.charAt(0).toUpperCase() || "D"}
+        {loading ? (
+          <div className="dashboard-skeleton">
+            <div className="skeleton skeleton-hero" />
+            <div className="grid grid-4">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div className="skeleton skeleton-card" key={index} />
+              ))}
             </div>
           </div>
-        </section>
-
-        <section className="grid grid-4 dashboard-stats">
-
-          <div className="card stat-card">
-            <div className="card-body">
-              <div className="stat-top">
-                <span className="stat-icon">
-                  ▣
-                </span>
-
-                <span className="stat-label">
-                  Projects
-                </span>
-              </div>
-
-              <h2 className="stat-value">
-                {stats?.total_projects ?? 0}
-              </h2>
-
-              <p className="stat-description">
-                Total projects
-              </p>
-            </div>
-          </div>
-
-          <div className="card stat-card">
-            <div className="card-body">
-              <div className="stat-top">
-                <span className="stat-icon">
-                  ✓
-                </span>
-
-                <span className="stat-label">
-                  Tasks
-                </span>
-              </div>
-
-              <h2 className="stat-value">
-                {stats?.total_tasks ?? 0}
-              </h2>
-
-              <p className="stat-description">
-                Across all projects
-              </p>
-            </div>
-          </div>
-
-          <div className="card stat-card">
-            <div className="card-body">
-              <div className="stat-top">
-                <span className="stat-icon">
-                  ◷
-                </span>
-
-                <span className="stat-label">
-                  In Progress
-                </span>
-              </div>
-
-              <h2 className="stat-value">
-                {stats?.in_progress_tasks ?? 0}
-              </h2>
-
-              <p className="stat-description">
-                Currently being worked on
-              </p>
-            </div>
-          </div>
-
-          <div className="card stat-card">
-            <div className="card-body">
-              <div className="stat-top">
-                <span className="stat-icon">
-                  ✓
-                </span>
-
-                <span className="stat-label">
-                  Completed
-                </span>
-              </div>
-
-              <h2 className="stat-value">
-                {stats?.done_tasks ?? 0}
-              </h2>
-
-              <p className="stat-description">
-                {completionRate}% completion rate
-              </p>
-            </div>
-          </div>
-
-        </section>
-
-        <section className="grid grid-2 dashboard-main-grid">
-
-          <div className="card">
-            <div className="card-header">
+        ) : (
+          <>
+            <section className="dashboard-welcome">
               <div>
-                <h3>Task Progress</h3>
-                <p className="text-muted">
-                  Current task distribution
-                </p>
-              </div>
-            </div>
-
-            <div className="card-body">
-
-              <div className="progress-row">
-                <div className="progress-label">
-                  <span>To Do</span>
-                  <strong>
-                    {stats?.todo_tasks ?? 0}
-                  </strong>
-                </div>
-
-                <div className="progress-track">
-                  <div
-                    className="progress-bar progress-todo"
-                    style={{
-                      width: `${
-                        stats && stats.total_tasks > 0
-                          ? (stats.todo_tasks /
-                              stats.total_tasks) *
-                            100
-                          : 0
-                      }%`,
-                    }}
-                  />
-                </div>
+                <p className="dashboard-label">Welcome back</p>
+                <h2>{user?.username || "Developer"}</h2>
+                <p className="dashboard-email">{user?.email}</p>
               </div>
 
-              <div className="progress-row">
-                <div className="progress-label">
-                  <span>In Progress</span>
-                  <strong>
-                    {stats?.in_progress_tasks ?? 0}
-                  </strong>
+              <div className="dashboard-identity">
+                <div className="avatar avatar-lg">
+                  {initialsFromName(user?.username)}
                 </div>
-
-                <div className="progress-track">
-                  <div
-                    className="progress-bar progress-in-progress"
-                    style={{
-                      width: `${
-                        stats && stats.total_tasks > 0
-                          ? (stats.in_progress_tasks /
-                              stats.total_tasks) *
-                            100
-                          : 0
-                      }%`,
-                    }}
-                  />
-                </div>
+                <span>Signed in</span>
               </div>
+            </section>
 
-              <div className="progress-row">
-                <div className="progress-label">
-                  <span>Completed</span>
-                  <strong>
-                    {stats?.done_tasks ?? 0}
-                  </strong>
+            <section className="grid grid-4 dashboard-stats">
+              {statCards.map((card) => (
+                <article className="stat-card" key={card.label}>
+                  <div className="stat-top">
+                    <span className="stat-icon">
+                      <Icon name={card.icon} />
+                    </span>
+                    <span className="stat-label">{card.label}</span>
+                  </div>
+
+                  <strong className="stat-value">{card.value}</strong>
+                  <p className="stat-description">{card.description}</p>
+                </article>
+              ))}
+            </section>
+
+            <section className="grid grid-2 dashboard-main-grid">
+              <article className="panel">
+                <div className="panel-header">
+                  <div>
+                    <h3>Task Progress</h3>
+                    <p>Current task distribution</p>
+                  </div>
                 </div>
 
-                <div className="progress-track">
-                  <div
-                    className="progress-bar progress-done"
-                    style={{
-                      width: `${
-                        stats && stats.total_tasks > 0
-                          ? (stats.done_tasks /
-                              stats.total_tasks) *
-                            100
-                          : 0
-                      }%`,
-                    }}
-                  />
+                <div className="panel-body">
+                  {totalTasks === 0 ? (
+                    <div className="compact-empty">
+                      <h4>No tasks yet</h4>
+                      <p>Create tasks inside a project to see progress.</p>
+                    </div>
+                  ) : (
+                    progressRows.map((row) => (
+                      <div className="progress-row" key={row.label}>
+                        <div className="progress-label">
+                          <span>{row.label}</span>
+                          <strong>{row.value}</strong>
+                        </div>
+
+                        <div className="progress-track">
+                          <div
+                            className={`progress-bar ${row.className}`}
+                            style={{
+                              width: `${(row.value / totalTasks) * 100}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
-              </div>
+              </article>
 
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="card-header">
-              <div>
-                <h3>Priority Overview</h3>
-                <p className="text-muted">
-                  Tasks by priority
-                </p>
-              </div>
-            </div>
-
-            <div className="card-body priority-overview">
-
-              <div className="priority-item">
-                <div className="priority-info">
-                  <span className="priority-dot priority-low" />
-                  <span>Low</span>
-                </div>
-
-                <strong>
-                  {stats?.low_priority_tasks ?? 0}
-                </strong>
-              </div>
-
-              <div className="priority-item">
-                <div className="priority-info">
-                  <span className="priority-dot priority-medium" />
-                  <span>Medium</span>
+              <article className="panel">
+                <div className="panel-header">
+                  <div>
+                    <h3>Priority Overview</h3>
+                    <p>Work grouped by urgency</p>
+                  </div>
                 </div>
 
-                <strong>
-                  {stats?.medium_priority_tasks ?? 0}
-                </strong>
-              </div>
+                <div className="panel-body priority-overview">
+                  {priorityRows.map((row) => (
+                    <div className="priority-item" key={row.label}>
+                      <div className="priority-info">
+                        <span className={`priority-dot priority-${row.tone}`} />
+                        <span>{row.label}</span>
+                      </div>
+                      <strong>{row.value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            </section>
 
-              <div className="priority-item">
-                <div className="priority-info">
-                  <span className="priority-dot priority-high" />
-                  <span>High</span>
+            <section className="grid grid-2 dashboard-actions">
+              <article className="action-panel">
+                <div className="action-content">
+                  <span className="action-icon">
+                    <Icon name="folder" />
+                  </span>
+
+                  <div>
+                    <h3>Manage Projects</h3>
+                    <p>Create project containers and jump into their tasks.</p>
+                  </div>
                 </div>
 
-                <strong>
-                  {stats?.high_priority_tasks ?? 0}
-                </strong>
-              </div>
+                <button
+                  className="btn-secondary"
+                  onClick={() => navigate("/projects")}
+                  type="button"
+                >
+                  View Projects
+                </button>
+              </article>
 
-              <div className="priority-item">
-                <div className="priority-info">
-                  <span className="priority-dot priority-unassigned" />
-                  <span>Unassigned</span>
+              <article className="action-panel">
+                <div className="action-content">
+                  <span className="action-icon">
+                    <Icon name="tasks" />
+                  </span>
+
+                  <div>
+                    <h3>Manage Tasks</h3>
+                    <p>Search, filter, assign, and update development work.</p>
+                  </div>
                 </div>
 
-                <strong>
-                  {stats?.unassigned_tasks ?? 0}
-                </strong>
-              </div>
-
-            </div>
-          </div>
-
-        </section>
-
-        <section className="grid grid-2 dashboard-actions">
-
-          <div className="dashboard-action-card card">
-            <div className="card-body">
-              <div className="action-content">
-                <span className="action-icon">
-                  ▣
-                </span>
-
-                <div>
-                  <h3>Manage Projects</h3>
-                  <p>
-                    Create projects, organize your work,
-                    and track project progress.
-                  </p>
-                </div>
-              </div>
-
-              <button
-                className="btn-secondary"
-                onClick={() => navigate("/projects")}
-              >
-                View Projects
-              </button>
-            </div>
-          </div>
-
-          <div className="dashboard-action-card card">
-            <div className="card-body">
-              <div className="action-content">
-                <span className="action-icon">
-                  ✓
-                </span>
-
-                <div>
-                  <h3>Manage Tasks</h3>
-                  <p>
-                    View, filter, assign, and update your
-                    development tasks.
-                  </p>
-                </div>
-              </div>
-
-              <button
-                className="btn-secondary"
-                onClick={() => navigate("/tasks")}
-              >
-                View Tasks
-              </button>
-            </div>
-          </div>
-
-        </section>
-
+                <button
+                  className="btn-secondary"
+                  onClick={() => navigate("/tasks")}
+                  type="button"
+                >
+                  View Tasks
+                </button>
+              </article>
+            </section>
+          </>
+        )}
       </div>
     </div>
   )

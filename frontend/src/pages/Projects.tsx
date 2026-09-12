@@ -1,46 +1,58 @@
-import { type FormEvent, useEffect, useState } from "react"
-import { Link } from "react-router-dom"
+import { type FormEvent, useCallback, useEffect, useState } from "react"
+import { Link, useNavigate } from "react-router-dom"
+import Icon from "../components/Icon"
+import Toast from "../components/Toast"
 import api from "../services/api"
 import { type Project } from "../types/project"
+import { getErrorMessage, isUnauthorized } from "../utils/errors"
 
 function Projects() {
-  const [projects, setProjects] = useState<Project[]>([])
+  const navigate = useNavigate()
 
+  const [projects, setProjects] = useState<Project[]>([])
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
-
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [error, setError] = useState("")
-  const [showCreateForm, setShowCreateForm] = useState(false)
+  const [toast, setToast] = useState("")
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null)
 
-  const fetchProjects = async () => {
+  const fetchProjects = useCallback(async () => {
     try {
       setLoading(true)
       setError("")
 
-      const response = await api.get("/projects")
+      const response = await api.get<Project[]>("/projects")
       setProjects(response.data)
-    } catch (error: any) {
-      setError(
-        error.response?.data?.detail ||
-        "Failed to load projects"
-      )
+    } catch (error) {
+      if (isUnauthorized(error)) {
+        navigate("/login", { replace: true })
+        return
+      }
+
+      setError(getErrorMessage(error, "Failed to load projects."))
     } finally {
       setLoading(false)
     }
-  }
+  }, [navigate])
 
   useEffect(() => {
     fetchProjects()
-  }, [])
+  }, [fetchProjects])
 
-  const handleCreateProject = async (e: FormEvent) => {
-    e.preventDefault()
+  const resetCreateForm = () => {
+    setName("")
+    setDescription("")
+  }
 
-    if (!name.trim()) {
-      setError("Project name is required")
+  const handleCreateProject = async (event: FormEvent) => {
+    event.preventDefault()
+
+    if (name.trim().length < 3) {
+      setError("Project name must be at least 3 characters.")
       return
     }
 
@@ -53,46 +65,35 @@ function Projects() {
         description: description.trim() || null,
       })
 
-      setName("")
-      setDescription("")
-      setShowCreateForm(false)
-
+      resetCreateForm()
+      setShowCreateModal(false)
+      setToast("Project created.")
       await fetchProjects()
-    } catch (error: any) {
-      setError(
-        error.response?.data?.detail ||
-        "Failed to create project"
-      )
+    } catch (error) {
+      setError(getErrorMessage(error, "Failed to create project."))
     } finally {
       setCreating(false)
     }
   }
 
-  const handleDeleteProject = async (projectId: number) => {
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this project? This action cannot be undone."
-    )
-
-    if (!confirmed) {
+  const handleDeleteProject = async () => {
+    if (!projectToDelete) {
       return
     }
 
     try {
-      setDeletingId(projectId)
+      setDeletingId(projectToDelete.id)
       setError("")
 
-      await api.delete(`/projects/${projectId}`)
+      await api.delete(`/projects/${projectToDelete.id}`)
 
       setProjects((currentProjects) =>
-        currentProjects.filter(
-          (project) => project.id !== projectId
-        )
+        currentProjects.filter((project) => project.id !== projectToDelete.id),
       )
-    } catch (error: any) {
-      setError(
-        error.response?.data?.detail ||
-        "Failed to delete project"
-      )
+      setToast("Project deleted.")
+      setProjectToDelete(null)
+    } catch (error) {
+      setError(getErrorMessage(error, "Failed to delete project."))
     } finally {
       setDeletingId(null)
     }
@@ -101,213 +102,247 @@ function Projects() {
   return (
     <div className="page">
       <div className="page-container">
-
         <header className="page-header">
           <div className="page-header-content">
+            <p className="eyebrow">Workspace</p>
             <h1>Projects</h1>
-            <p>
-              Organize your development work into focused projects.
-            </p>
+            <p>Organize development work into focused project spaces.</p>
           </div>
 
           <button
             className="btn-primary"
             onClick={() => {
-              setShowCreateForm((current) => !current)
+              setShowCreateModal(true)
               setError("")
             }}
+            type="button"
           >
-            {showCreateForm ? "Cancel" : "+ New Project"}
+            <Icon name="plus" />
+            New Project
           </button>
         </header>
 
-        {error && (
-          <div className="error-message project-error">
-            {error}
-          </div>
-        )}
+        {error && <div className="error-message project-error">{error}</div>}
 
-        {showCreateForm && (
-          <section className="card create-project-card">
-            <div className="card-header">
-              <div>
-                <h3>Create a new project</h3>
-                <p className="text-muted">
-                  Set up a project to start tracking your work.
-                </p>
-              </div>
+        <section className="section-heading">
+          <div>
+            <h2>Your Projects</h2>
+            <p>
+              {projects.length} {projects.length === 1 ? "project" : "projects"}
+            </p>
+          </div>
+
+          <button
+            className="btn-secondary"
+            type="button"
+            onClick={fetchProjects}
+            disabled={loading}
+          >
+            <Icon name="refresh" />
+            Refresh
+          </button>
+        </section>
+
+        {loading ? (
+          <div className="projects-grid">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div className="skeleton skeleton-project" key={index} />
+            ))}
+          </div>
+        ) : projects.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">
+              <Icon name="folder" />
             </div>
 
-            <div className="card-body">
-              <form
-                onSubmit={handleCreateProject}
-                className="project-form"
-              >
-                <div className="form-group">
-                  <label htmlFor="project-name">
-                    Project name
-                  </label>
+            <h3>No projects yet</h3>
+            <p>Create your first project to start organizing your work.</p>
 
-                  <input
-                    id="project-name"
-                    type="text"
-                    placeholder="e.g. DevTrack"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    autoFocus
-                    maxLength={100}
-                  />
+            <button
+              className="btn-primary"
+              onClick={() => setShowCreateModal(true)}
+              type="button"
+            >
+              <Icon name="plus" />
+              Create Project
+            </button>
+          </div>
+        ) : (
+          <div className="projects-grid">
+            {projects.map((project) => (
+              <article className="project-card" key={project.id}>
+                <div className="project-card-top">
+                  <div className="project-icon">
+                    {project.name.charAt(0).toUpperCase()}
+                  </div>
+
+                  <span className="project-id">#{project.id}</span>
                 </div>
 
-                <div className="form-group">
-                  <label htmlFor="project-description">
-                    Description
-                  </label>
-
-                  <textarea
-                    id="project-description"
-                    placeholder="What are you building?"
-                    value={description}
-                    onChange={(e) =>
-                      setDescription(e.target.value)
-                    }
-                    rows={4}
-                    maxLength={500}
-                  />
+                <div className="project-info">
+                  <h3>{project.name}</h3>
+                  <p>
+                    {project.description ||
+                      "No description provided for this project."}
+                  </p>
                 </div>
 
-                <div className="project-form-actions">
+                <div className="project-card-footer">
+                  <Link
+                    className="btn-secondary project-tasks-button"
+                    to={`/projects/${project.id}/tasks`}
+                  >
+                    <Icon name="tasks" />
+                    Tasks
+                    <Icon name="arrow-right" />
+                  </Link>
+
                   <button
+                    className="icon-button danger"
+                    onClick={() => setProjectToDelete(project)}
+                    disabled={deletingId === project.id}
                     type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      setShowCreateForm(false)
-                      setName("")
-                      setDescription("")
-                    }}
+                    aria-label={`Delete ${project.name}`}
+                    title="Delete project"
                   >
-                    Cancel
-                  </button>
-
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={creating}
-                  >
-                    {creating
-                      ? "Creating..."
-                      : "Create Project"}
+                    <Icon name="trash" />
                   </button>
                 </div>
-              </form>
-            </div>
-          </section>
-        )}
-
-        <section className="projects-section">
-
-          <div className="section-heading">
-            <div>
-              <h2>Your Projects</h2>
-              <p>
-                {projects.length}{" "}
-                {projects.length === 1
-                  ? "project"
-                  : "projects"}
-              </p>
-            </div>
+              </article>
+            ))}
           </div>
+        )}
+      </div>
 
-          {loading ? (
-            <div className="projects-loading">
-              <div className="loading">
-                Loading projects...
+      {showCreateModal && (
+        <div
+          className="modal-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !creating) {
+              setShowCreateModal(false)
+              resetCreateForm()
+            }
+          }}
+        >
+          <section className="modal" role="dialog" aria-modal="true">
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">New project</p>
+                <h2>Create project</h2>
               </div>
+
+              <button
+                className="icon-button"
+                onClick={() => {
+                  setShowCreateModal(false)
+                  resetCreateForm()
+                }}
+                disabled={creating}
+                type="button"
+                aria-label="Close"
+              >
+                <Icon name="close" />
+              </button>
             </div>
-          ) : projects.length === 0 ? (
-            <div className="card empty-projects">
-              <div className="empty-state">
-                <div className="empty-icon">▣</div>
 
-                <h3>No projects yet</h3>
+            <form onSubmit={handleCreateProject}>
+              <div className="form-group">
+                <label htmlFor="project-name">Project name</label>
+                <input
+                  id="project-name"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder="DevTrack"
+                  autoFocus
+                  maxLength={100}
+                  disabled={creating}
+                  required
+                />
+              </div>
 
-                <p>
-                  Create your first project to start
-                  organizing your development work.
-                </p>
+              <div className="form-group">
+                <label htmlFor="project-description">Description</label>
+                <textarea
+                  id="project-description"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="What are you building?"
+                  maxLength={1000}
+                  disabled={creating}
+                  rows={5}
+                />
+              </div>
+
+              <div className="modal-footer">
+                <button
+                  className="btn-secondary"
+                  type="button"
+                  onClick={() => {
+                    setShowCreateModal(false)
+                    resetCreateForm()
+                  }}
+                  disabled={creating}
+                >
+                  Cancel
+                </button>
 
                 <button
                   className="btn-primary"
-                  onClick={() => {
-                    setShowCreateForm(true)
-                    setError("")
-                  }}
+                  type="submit"
+                  disabled={creating || name.trim().length < 3}
                 >
-                  Create your first project
+                  {creating && <span className="button-spinner" />}
+                  {creating ? "Creating" : "Create Project"}
                 </button>
               </div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {projectToDelete && (
+        <div className="modal-overlay" role="presentation">
+          <section className="modal confirm-modal" role="dialog" aria-modal="true">
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow danger-text">Delete project</p>
+                <h2>{projectToDelete.name}</h2>
+              </div>
             </div>
-          ) : (
-            <div className="projects-grid">
-              {projects.map((project) => (
-                <article
-                  className="project-card card"
-                  key={project.id}
-                >
-                  <div className="card-body">
 
-                    <div className="project-card-top">
-                      <div className="project-icon">
-                        {project.name
-                          .charAt(0)
-                          .toUpperCase()}
-                      </div>
+            <p>
+              This will permanently delete the project. Any backend cascade
+              behavior is controlled by the API.
+            </p>
 
-                      <span className="project-id">
-                        #{project.id}
-                      </span>
-                    </div>
+            <div className="modal-footer">
+              <button
+                className="btn-secondary"
+                type="button"
+                onClick={() => setProjectToDelete(null)}
+                disabled={deletingId === projectToDelete.id}
+              >
+                Cancel
+              </button>
 
-                    <div className="project-info">
-                      <h3>{project.name}</h3>
-
-                      <p>
-                        {project.description ||
-                          "No description provided for this project."}
-                      </p>
-                    </div>
-
-                    <div className="project-card-footer">
-                      <Link
-                        className="btn-primary project-tasks-button"
-                        to={`/projects/${project.id}/tasks`}
-                      >
-                        View Tasks
-                        <span>→</span>
-                      </Link>
-
-                      <button
-                        className="btn-danger-outline"
-                        onClick={() =>
-                          handleDeleteProject(project.id)
-                        }
-                        disabled={deletingId === project.id}
-                      >
-                        {deletingId === project.id
-                          ? "Deleting..."
-                          : "Delete"}
-                      </button>
-                    </div>
-
-                  </div>
-                </article>
-              ))}
+              <button
+                className="btn-danger"
+                type="button"
+                onClick={handleDeleteProject}
+                disabled={deletingId === projectToDelete.id}
+              >
+                {deletingId === projectToDelete.id && (
+                  <span className="button-spinner" />
+                )}
+                {deletingId === projectToDelete.id ? "Deleting" : "Delete"}
+              </button>
             </div>
-          )}
+          </section>
+        </div>
+      )}
 
-        </section>
-
-      </div>
+      <Toast message={toast} onDismiss={() => setToast("")} />
     </div>
   )
 }

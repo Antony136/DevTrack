@@ -11,6 +11,9 @@ import Dashboard from "./pages/Dashboard"
 import Projects from "./pages/Projects"
 import Tasks from "./pages/Tasks"
 import ProtectedRoute from "./components/ProtectedRoute"
+import DashboardLayout from "./layouts/DashboardLayout"
+import Notifications from "./pages/Notifications"
+import Profile from "./pages/Profile"
 
 function App() {
   return (
@@ -22,10 +25,14 @@ function App() {
         <Route path="/register" element={<Register />} />
 
         <Route element={<ProtectedRoute />}>
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/projects/:projectId/tasks" element={<Tasks />} />
-          <Route path="/tasks" element={<Tasks />} />
+          <Route element={<DashboardLayout />}>
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/projects" element={<Projects />} />
+            <Route path="/projects/:projectId/tasks" element={<Tasks />} />
+            <Route path="/tasks" element={<Tasks />} />
+            <Route path="/notifications" element={<Notifications />} />
+            <Route path="/profile" element={<Profile />} />
+          </Route>
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />

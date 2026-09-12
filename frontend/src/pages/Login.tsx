@@ -1,6 +1,8 @@
-import { useState } from "react"
+import { type FormEvent, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
+import Icon from "../components/Icon"
 import api from "../services/api"
+import { getErrorMessage } from "../utils/errors"
 
 function Login() {
   const navigate = useNavigate()
@@ -10,11 +12,11 @@ function Login() {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleLogin = async (event: FormEvent) => {
+    event.preventDefault()
 
     if (!username.trim() || !password) {
-      setError("Please enter your username and password")
+      setError("Enter your username and password.")
       return
     }
 
@@ -22,17 +24,18 @@ function Login() {
       setError("")
       setLoading(true)
 
-      const response = await api.post("/login", {
-        username,
+      const response = await api.post<{
+        access_token: string
+        token_type: string
+      }>("/login", {
+        username: username.trim(),
         password,
       })
 
       localStorage.setItem("token", response.data.access_token)
-      navigate("/dashboard")
-    } catch (error: any) {
-      setError(
-        error.response?.data?.detail || "Invalid username or password"
-      )
+      navigate("/dashboard", { replace: true })
+    } catch (error) {
+      setError(getErrorMessage(error, "Invalid username or password."))
     } finally {
       setLoading(false)
     }
@@ -40,9 +43,11 @@ function Login() {
 
   return (
     <main className="auth-page">
-      <div className="auth-card">
-        <div className="auth-brand">
-          <div className="auth-logo">D</div>
+      <section className="auth-card" aria-labelledby="login-title">
+        <div className="brand-lockup auth-brand">
+          <div className="brand-mark">
+            <Icon name="spark" />
+          </div>
 
           <div>
             <h1>DevTrack</h1>
@@ -51,57 +56,57 @@ function Login() {
         </div>
 
         <div className="auth-heading">
-          <h2>Welcome back</h2>
-          <p>Sign in to continue to your workspace.</p>
+          <p className="eyebrow">Secure workspace</p>
+          <h2 id="login-title">Welcome back</h2>
+          <p>Sign in to continue planning, assigning, and shipping work.</p>
         </div>
 
-        {error && (
-          <div className="error-message">
-            {error}
-          </div>
-        )}
+        {error && <div className="error-message">{error}</div>}
 
-        <form onSubmit={handleLogin} className="auth-form">
+        <form onSubmit={handleLogin} className="auth-form" noValidate>
           <div className="form-group">
             <label htmlFor="username">Username</label>
-
             <input
               id="username"
               type="text"
-              placeholder="Enter your username"
+              placeholder="antony"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(event) => setUsername(event.target.value)}
               autoComplete="username"
+              disabled={loading}
+              required
             />
           </div>
 
           <div className="form-group">
             <label htmlFor="password">Password</label>
-
             <input
               id="password"
               type="password"
               placeholder="Enter your password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
+              disabled={loading}
+              required
             />
           </div>
 
           <button
             type="submit"
             className="auth-submit"
-            disabled={loading}
+            disabled={loading || !username.trim() || !password}
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading && <span className="button-spinner" />}
+            {loading ? "Signing in" : "Sign in"}
           </button>
         </form>
 
         <div className="auth-footer">
-          <span>Don't have an account?</span>
+          <span>New to DevTrack?</span>
           <Link to="/register">Create account</Link>
         </div>
-      </div>
+      </section>
     </main>
   )
 }
