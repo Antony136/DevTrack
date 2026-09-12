@@ -1,6 +1,7 @@
-import { FormEvent, useEffect, useState } from "react"
+import { type FormEvent, useEffect, useState } from "react"
 import api from "../services/api"
 import { type Project } from "../types/project"
+import { Link } from "react-router-dom"
 
 function Projects() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -117,6 +118,10 @@ function Projects() {
             </p>
 
             <p>Project ID: {project.id}</p>
+            
+            <Link to={`/projects/${project.id}/tasks`}>
+              View Tasks
+            </Link>
 
             <button
               onClick={() => handleDeleteProject(project.id)}

@@ -37,6 +37,6 @@ class Task(Base):
     )
 
     assignee_id: Mapped[int | None] = mapped_column(
-    ForeignKey("users.id"),
-    nullable=True
+        ForeignKey("users.id"),
+        nullable=True
     )
