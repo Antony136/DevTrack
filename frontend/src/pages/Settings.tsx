@@ -1,5 +1,5 @@
 import { useTheme, type ColorScheme, type FontSize, type Theme } from "../context/ThemeContext"
-import Icon from "../components/Icon"
+import Icon, { type IconName } from "../components/Icon"
 
 function Settings() {
   const { 
@@ -13,7 +13,7 @@ function Settings() {
     toggleShowSidebar,
   } = useTheme()
 
-  const themes: Array<{ value: Theme; label: string; icon: string }> = [
+  const themes: Array<{ value: Theme; label: string; icon: IconName }> = [
     { value: "dark", label: "Dark", icon: "moon" },
     { value: "light", label: "Light", icon: "sun" },
   ]

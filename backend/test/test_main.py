@@ -1492,3 +1492,37 @@ def test_update_task_assignee_to_non_member_fails(client, auth_headers, project,
 
     assert update_res.status_code == 400
     assert update_res.json()["detail"] == "Assignee is not a member of this project"
+
+
+# -------------------------
+# Phase 9 — Add "My Tasks"
+# -------------------------
+
+def test_get_my_tasks(client, auth_headers, project, second_user):
+    # Add second_user to project
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    # Owner creates task assigned to second_user
+    client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Task for second user in My Tasks",
+            "assignee_id": second_user["user"]["id"]
+        }
+    )
+
+    # second_user checks GET /me/tasks
+    res = client.get("/me/tasks", headers=second_user["headers"])
+    assert res.status_code == 200
+
+    my_tasks = res.json()
+    assert len(my_tasks) == 1
+    assert my_tasks[0]["title"] == "Task for second user in My Tasks"
+    assert my_tasks[0]["project_id"] == project["id"]
+    assert my_tasks[0]["project_name"] == project["name"]
+    assert my_tasks[0]["assignee_id"] == second_user["user"]["id"]

@@ -9,6 +9,7 @@ export interface Task {
   status: TaskStatus
   priority: TaskPriority
   project_id: number
+  project_name?: string
   assignee_id: number | null
 }
 

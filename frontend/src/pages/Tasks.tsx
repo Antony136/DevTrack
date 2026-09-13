@@ -11,6 +11,7 @@ import TaskCard from "../components/TaskCard"
 import Toast from "../components/Toast"
 import api from "../services/api"
 import { type Project } from "../types/project"
+import { type ProjectMember } from "../types/project_member"
 import {
   type Task,
   type TaskPriority,
@@ -18,11 +19,9 @@ import {
   type TaskStatus,
   type TaskUpdate,
 } from "../types/task"
-import { type User } from "../types/user"
 import { getErrorMessage, isUnauthorized } from "../utils/errors"
 
 const pageSize = 9
-const statusOptions: TaskStatus[] = ["todo", "in_progress", "done"]
 const priorityOptions: TaskPriority[] = ["low", "medium", "high"]
 
 interface TaskDraft {
@@ -54,7 +53,8 @@ function Tasks() {
   const navigate = useNavigate()
 
   const [tasks, setTasks] = useState<Task[]>([])
-  const [users, setUsers] = useState<User[]>([])
+  const [members, setMembers] = useState<ProjectMember[]>([])
+  const [modalMembers, setModalMembers] = useState<ProjectMember[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [draft, setDraft] = useState<TaskDraft>(emptyDraft)
   const [editDraft, setEditDraft] = useState<TaskDraft>(emptyDraft)
@@ -80,8 +80,61 @@ function Tasks() {
 
   const numericProjectId = projectId ? Number(projectId) : null
   const project = projects.find((item) => item.id === numericProjectId)
+  const isMyTasks = !numericProjectId
   const searchQuery = debouncedSearch.trim()
   const useClientQuery = !numericProjectId || searchQuery.length > 0
+
+  const handleUnauthorized = useCallback(
+    (error: unknown) => {
+      if (isUnauthorized(error)) {
+        navigate("/login", { replace: true })
+        return true
+      }
+      return false
+    },
+    [navigate],
+  )
+
+  const fetchProjects = useCallback(async () => {
+    try {
+      const response = await api.get<Project[]>("/projects")
+      setProjects(response.data)
+    } catch (error) {
+      if (!handleUnauthorized(error)) {
+        setError(getErrorMessage(error, "Failed to load projects."))
+      }
+    }
+  }, [handleUnauthorized])
+
+  const fetchProjectMembers = useCallback(async (pId: number) => {
+    try {
+      const res = await api.get<ProjectMember[]>(`/projects/${pId}/members`)
+      setMembers(res.data)
+    } catch {
+      setMembers([])
+    }
+  }, [])
+
+  const fetchModalMembers = useCallback(async (pId: number) => {
+    try {
+      const res = await api.get<ProjectMember[]>(`/projects/${pId}/members`)
+      setModalMembers(res.data)
+    } catch {
+      setModalMembers([])
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchProjects()
+  }, [fetchProjects])
+
+  useEffect(() => {
+    if (numericProjectId) {
+      fetchProjectMembers(numericProjectId)
+    } else {
+      setMembers([])
+    }
+  }, [numericProjectId, fetchProjectMembers])
 
   const sortTasks = useCallback(
     (items: Task[]) => {
@@ -122,46 +175,37 @@ function Tasks() {
           return false
         }
 
+        if (searchQuery) {
+          const titleMatch = task.title.toLowerCase().includes(searchQuery.toLowerCase())
+          const descMatch = task.description?.toLowerCase().includes(searchQuery.toLowerCase())
+          if (!titleMatch && !descMatch) {
+            return false
+          }
+        }
+
         return true
       })
     },
-    [assigneeFilter, numericProjectId, priorityFilter, statusFilter],
+    [assigneeFilter, numericProjectId, priorityFilter, searchQuery, statusFilter],
   )
-
-  const handleUnauthorized = useCallback(
-    (error: unknown) => {
-      if (isUnauthorized(error)) {
-        navigate("/login", { replace: true })
-        return true
-      }
-
-      return false
-    },
-    [navigate],
-  )
-
-  const fetchReferences = useCallback(async () => {
-    try {
-      const [usersResponse, projectsResponse] = await Promise.all([
-        api.get<User[]>("/users"),
-        api.get<Project[]>("/projects"),
-      ])
-
-      setUsers(usersResponse.data)
-      setProjects(projectsResponse.data)
-    } catch (error) {
-      if (!handleUnauthorized(error)) {
-        setError(getErrorMessage(error, "Failed to load workspace data."))
-      }
-    }
-  }, [handleUnauthorized])
 
   const fetchTasks = useCallback(async () => {
     try {
       setLoading(true)
       setError("")
 
-      if (useClientQuery) {
+      if (isMyTasks) {
+        // Phase 9: My Tasks endpoint
+        const response = await api.get<Task[]>("/me/tasks")
+        const filtered = applyClientFilters(response.data)
+        const sorted = sortTasks(filtered)
+        const start = (page - 1) * pageSize
+        const pageItems = sorted.slice(start, start + pageSize)
+
+        setTasks(pageItems)
+        setKnownTotal(sorted.length)
+        setHasNextPage(start + pageSize < sorted.length)
+      } else if (useClientQuery) {
         const response = await api.get<Task[]>("/tasks/search", {
           params: { q: searchQuery },
         })
@@ -205,6 +249,7 @@ function Tasks() {
     assigneeFilter,
     descending,
     handleUnauthorized,
+    isMyTasks,
     numericProjectId,
     page,
     priorityFilter,
@@ -214,10 +259,6 @@ function Tasks() {
     statusFilter,
     useClientQuery,
   ])
-
-  useEffect(() => {
-    fetchReferences()
-  }, [fetchReferences])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -232,10 +273,16 @@ function Tasks() {
   }, [fetchTasks])
 
   const resetDraft = () => {
+    const pId = numericProjectId ? String(numericProjectId) : ""
     setDraft({
       ...emptyDraft,
-      projectId: numericProjectId ? String(numericProjectId) : "",
+      projectId: pId,
     })
+    if (pId) {
+      fetchModalMembers(Number(pId))
+    } else {
+      setModalMembers([])
+    }
   }
 
   const clearFilters = () => {
@@ -305,6 +352,7 @@ function Tasks() {
       priority: task.priority,
       assigneeId: task.assignee_id ? String(task.assignee_id) : "",
     })
+    fetchModalMembers(task.project_id)
     setError("")
   }
 
@@ -350,7 +398,7 @@ function Tasks() {
 
       setTasks((currentTasks) =>
         currentTasks.map((currentTask) =>
-          currentTask.id === task.id ? response.data : currentTask,
+          currentTask.id === task.id ? { ...currentTask, status: response.data.status } : currentTask,
         ),
       )
       setToast("Task status updated.")
@@ -382,6 +430,15 @@ function Tasks() {
     }
   }
 
+  const handleDraftProjectChange = (pId: string) => {
+    setDraft((current) => ({ ...current, projectId: pId, assigneeId: "" }))
+    if (pId) {
+      fetchModalMembers(Number(pId))
+    } else {
+      setModalMembers([])
+    }
+  }
+
   const totalPages = useMemo(() => {
     if (knownTotal === null) {
       return null
@@ -396,32 +453,40 @@ function Tasks() {
     Boolean(priorityFilter) ||
     Boolean(assigneeFilter)
 
-  const emptyTitle = hasFilters ? "No matching tasks" : "No tasks yet"
+  const emptyTitle = hasFilters ? "No matching tasks" : isMyTasks ? "No tasks assigned to you" : "No tasks yet"
   const emptyDescription = hasFilters
-    ? "Try changing your search or filters."
-    : numericProjectId
-      ? "Create the first task for this project."
-      : "Create a project task to start tracking work."
+    ? "Try updating your search query or filters to find tasks."
+    : isMyTasks
+      ? "You currently have no tasks assigned to you across your projects."
+      : "Create the first task in this project to get work moving."
+
+  const userListForTaskCard = isMyTasks ? modalMembers : members
 
   return (
     <div className="page">
       <div className="page-container">
         <header className="page-header">
           <div className="page-header-content">
-            <p className="eyebrow">{numericProjectId ? "Project" : "Workspace"}</p>
-            <h1>{project?.name || (numericProjectId ? "Project Tasks" : "All Tasks")}</h1>
+            <p className="eyebrow">
+              {project ? project.name : isMyTasks ? "My Tasks" : "Tasks"}
+            </p>
+            <h1>
+              {project ? `${project.name} Tasks` : isMyTasks ? "My Tasks" : "All Tasks"}
+            </h1>
             <p>
-              {numericProjectId
-                ? "Plan and manage work inside this project."
-                : "Search and manage tasks across your projects."}
+              {project
+                ? project.description || "Tasks for this project."
+                : isMyTasks
+                  ? "Tasks assigned to you across all your projects."
+                  : "View and manage tasks across your projects."}
             </p>
           </div>
 
-          <div className="page-actions">
-            {numericProjectId && (
+          <div className="page-header-actions">
+            {project && (
               <Link className="btn-secondary" to="/projects">
-                <Icon name="arrow-left" />
-                Projects
+                <Icon name="folder" />
+                Back to Projects
               </Link>
             )}
 
@@ -441,56 +506,48 @@ function Tasks() {
           </div>
         </header>
 
-        {error && <div className="error-message tasks-error">{error}</div>}
+        {error && <div className="error-message task-error">{error}</div>}
 
-        <section className="task-toolbar">
-          <div className="task-search">
-            <Icon name="search" />
-            <input
-              type="search"
-              placeholder="Search tasks..."
-              value={search}
+        <section className="filter-card">
+          <div className="filter-grid">
+            <label className="search-input">
+              <Icon name="search" />
+              <input
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value)
+                  setPage(1)
+                }}
+                placeholder="Search tasks by title or description..."
+              />
+              {search && (
+                <button
+                  className="search-clear"
+                  onClick={() => {
+                    setSearch("")
+                    setDebouncedSearch("")
+                  }}
+                  type="button"
+                  aria-label="Clear search"
+                >
+                  <Icon name="close" />
+                </button>
+              )}
+            </label>
+
+            <select
+              value={statusFilter}
               onChange={(event) => {
-                setSearch(event.target.value)
+                setStatusFilter(event.target.value as TaskStatus | "")
                 setPage(1)
               }}
-              aria-label="Search tasks"
-            />
-            {search && (
-              <button
-                className="task-search-clear"
-                type="button"
-                onClick={() => {
-                  setSearch("")
-                  setDebouncedSearch("")
-                  setPage(1)
-                }}
-                aria-label="Clear search"
-              >
-                <Icon name="close" />
-              </button>
-            )}
-          </div>
-
-          <div className="task-filters" aria-label="Task filters">
-            <label className="select-with-icon">
-              <Icon name="filter" />
-              <select
-                value={statusFilter}
-                onChange={(event) => {
-                  setStatusFilter(event.target.value as TaskStatus | "")
-                  setPage(1)
-                }}
-                aria-label="Filter by status"
-              >
-                <option value="">All statuses</option>
-                {statusOptions.map((status) => (
-                  <option value={status} key={status}>
-                    {status.replace("_", " ")}
-                  </option>
-                ))}
-              </select>
-            </label>
+              aria-label="Filter by status"
+            >
+              <option value="">All statuses</option>
+              <option value="todo">To Do</option>
+              <option value="in_progress">In Progress</option>
+              <option value="done">Done</option>
+            </select>
 
             <select
               value={priorityFilter}
@@ -508,21 +565,23 @@ function Tasks() {
               ))}
             </select>
 
-            <select
-              value={assigneeFilter}
-              onChange={(event) => {
-                setAssigneeFilter(event.target.value)
-                setPage(1)
-              }}
-              aria-label="Filter by assignee"
-            >
-              <option value="">All assignees</option>
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.username}
-                </option>
-              ))}
-            </select>
+            {!isMyTasks && (
+              <select
+                value={assigneeFilter}
+                onChange={(event) => {
+                  setAssigneeFilter(event.target.value)
+                  setPage(1)
+                }}
+                aria-label="Filter by assignee"
+              >
+                <option value="">All assignees</option>
+                {members.map((member) => (
+                  <option key={member.user_id} value={member.user_id}>
+                    {member.username}
+                  </option>
+                ))}
+              </select>
+            )}
 
             <label className="select-with-icon">
               <Icon name="sort" />
@@ -595,7 +654,10 @@ function Tasks() {
             ) : (
               <button
                 className="btn-primary"
-                onClick={() => setShowCreateModal(true)}
+                onClick={() => {
+                  resetDraft()
+                  setShowCreateModal(true)
+                }}
                 type="button"
                 disabled={!numericProjectId && projects.length === 0}
               >
@@ -610,7 +672,7 @@ function Tasks() {
               <TaskCard
                 key={task.id}
                 task={task}
-                users={users}
+                users={userListForTaskCard}
                 onEdit={openEditModal}
                 onDelete={setTaskToDelete}
                 onStatusChange={handleQuickStatusChange}
@@ -672,11 +734,12 @@ function Tasks() {
           title="Create task"
           draft={draft}
           projects={projects}
-          users={users}
+          members={modalMembers}
           projectLocked={Boolean(numericProjectId)}
           submitting={creating}
           submitLabel="Create Task"
           onChange={setDraft}
+          onProjectChange={handleDraftProjectChange}
           onSubmit={handleCreateTask}
           onClose={() => {
             if (!creating) {
@@ -692,11 +755,12 @@ function Tasks() {
           title={`Edit task #${editingTask.id}`}
           draft={editDraft}
           projects={projects}
-          users={users}
+          members={modalMembers}
           projectLocked
           submitting={savingId === editingTask.id}
           submitLabel="Save Changes"
           onChange={setEditDraft}
+          onProjectChange={handleDraftProjectChange}
           onSubmit={handleUpdateTask}
           onClose={() => {
             if (savingId !== editingTask.id) {
@@ -753,11 +817,12 @@ interface TaskModalProps {
   title: string
   draft: TaskDraft
   projects: Project[]
-  users: User[]
+  members: ProjectMember[]
   projectLocked: boolean
   submitting: boolean
   submitLabel: string
   onChange: (draft: TaskDraft) => void
+  onProjectChange: (projectId: string) => void
   onSubmit: (event: FormEvent) => void
   onClose: () => void
 }
@@ -766,11 +831,12 @@ function TaskModal({
   title,
   draft,
   projects,
-  users,
+  members,
   projectLocked,
   submitting,
   submitLabel,
   onChange,
+  onProjectChange,
   onSubmit,
   onClose,
 }: TaskModalProps) {
@@ -812,7 +878,11 @@ function TaskModal({
             <select
               id="task-project"
               value={draft.projectId}
-              onChange={(event) => updateDraft({ projectId: event.target.value })}
+              onChange={(event) => {
+                const pId = event.target.value
+                updateDraft({ projectId: pId })
+                onProjectChange(pId)
+              }}
               disabled={projectLocked || submitting}
               required
             >
@@ -898,9 +968,9 @@ function TaskModal({
               disabled={submitting}
             >
               <option value="">Unassigned</option>
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.username}
+              {members.map((member) => (
+                <option key={member.user_id} value={member.user_id}>
+                  {member.username} ({member.role})
                 </option>
               ))}
             </select>

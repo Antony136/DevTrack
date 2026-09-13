@@ -2,7 +2,6 @@ import {
   type Task,
   type TaskStatus,
 } from "../types/task"
-import { type User } from "../types/user"
 import {
   formatPriority,
   formatStatus,
@@ -10,9 +9,15 @@ import {
 } from "../utils/format"
 import Icon from "./Icon"
 
+interface MemberLike {
+  id?: number
+  user_id?: number
+  username: string
+}
+
 interface TaskCardProps {
   task: Task
-  users: User[]
+  users: MemberLike[]
   onEdit: (task: Task) => void
   onDelete: (task: Task) => void
   onStatusChange: (task: Task, status: TaskStatus) => Promise<void>
@@ -29,7 +34,9 @@ function TaskCard({
   saving,
   deleting,
 }: TaskCardProps) {
-  const assignee = users.find((user) => user.id === task.assignee_id)
+  const assignee = users.find(
+    (user) => (user.id ?? user.user_id) === task.assignee_id
+  )
   const assigneeName = assignee?.username || "Unassigned"
 
   return (
@@ -38,6 +45,22 @@ function TaskCard({
         <span className={`priority-badge priority-badge-${task.priority}`}>
           {formatPriority(task.priority)}
         </span>
+
+        {task.project_name && (
+          <span
+            className="project-badge"
+            style={{
+              fontSize: "0.8rem",
+              fontWeight: 500,
+              padding: "0.2rem 0.5rem",
+              borderRadius: "4px",
+              background: "rgba(255, 255, 255, 0.08)",
+              color: "var(--text-muted, #94a3b8)",
+            }}
+          >
+            {task.project_name}
+          </span>
+        )}
 
         <span className="task-id">#{task.id}</span>
       </div>
