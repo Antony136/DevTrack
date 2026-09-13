@@ -46,3 +46,54 @@ def get_current_user(
         )
 
     return user
+
+
+def get_project_for_member(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from sqlalchemy import select
+    from app.models.project import Project
+    from app.models.project_member import ProjectMember
+
+    project = db.scalar(
+        select(Project)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
+        .where(
+            Project.id == project_id,
+            ProjectMember.user_id == current_user.id
+        )
+    )
+
+    if not project:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found"
+        )
+
+    return project
+
+
+def get_project_owner(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    from sqlalchemy import select
+    from app.models.project import Project
+
+    project = db.scalar(
+        select(Project).where(
+            Project.id == project_id,
+            Project.owner_id == current_user.id
+        )
+    )
+
+    if not project:
+        raise HTTPException(
+            status_code=404,
+            detail="Project not found"
+        )
+
+    return project

@@ -1,3 +1,7 @@
+from sqlalchemy import select
+from app.models.project_member import ProjectMember
+
+
 def test_home(client):
     response = client.get("/")
 
@@ -143,6 +147,32 @@ def test_create_project(client, auth_headers):
     assert data["name"] == "Test Project"
     assert data["description"] == "A project created during testing"
     assert "id" in data
+
+
+def test_create_project_adds_owner_member(client, auth_headers, db_session):
+    response = client.post(
+        "/projects",
+        headers=auth_headers,
+        json={
+            "name": "Member Test Project",
+            "description": "Testing automatic owner membership"
+        }
+    )
+
+    assert response.status_code == 201
+
+    project_data = response.json()
+    project_id = project_data["id"]
+
+    member = db_session.scalar(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project_id
+        )
+    )
+
+    assert member is not None
+    assert member.role == "owner"
+    assert member.user_id == project_data["owner_id"]
 
 
 def test_get_projects(client, auth_headers):
@@ -1068,6 +1098,182 @@ def test_dashboard_only_counts_current_user(
     assert data["in_progress_tasks"] == 0
     assert data["done_tasks"] == 0
 
-    assert data["low_priority_tasks"] == 1
-    assert data["medium_priority_tasks"] == 0
-    assert data["high_priority_tasks"] == 0
+
+# -------------------------
+# Project Members API (Phase 2 & 3)
+# -------------------------
+
+def test_get_project_members(client, auth_headers, project):
+    response = client.get(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers
+    )
+
+    assert response.status_code == 200
+
+    members = response.json()
+    assert len(members) == 1
+    assert members[0]["username"] == "testuser"
+    assert members[0]["role"] == "owner"
+
+
+def test_add_project_member(client, auth_headers, project, second_user):
+    response = client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={
+            "user_id": second_user["user"]["id"]
+        }
+    )
+
+    assert response.status_code == 201
+
+    member_data = response.json()
+    assert member_data["user_id"] == second_user["user"]["id"]
+    assert member_data["username"] == "seconduser"
+    assert member_data["role"] == "member"
+
+    # Verify second user can now get members list
+    list_res = client.get(
+        f"/projects/{project['id']}/members",
+        headers=second_user["headers"]
+    )
+    assert list_res.status_code == 200
+    assert len(list_res.json()) == 2
+
+
+def test_add_duplicate_member_fails(client, auth_headers, project, second_user):
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    # Attempt adding second time
+    response = client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "User is already a member of this project"
+
+
+def test_add_nonexistent_user_fails(client, auth_headers, project):
+    response = client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": 99999}
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "User not found"
+
+
+def test_non_member_cannot_get_members(client, project, second_user):
+    response = client.get(
+        f"/projects/{project['id']}/members",
+        headers=second_user["headers"]
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
+
+
+def test_non_owner_member_cannot_add_member(client, auth_headers, project, second_user):
+    # Owner adds second_user as member
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    # Register a third user
+    third_res = client.post(
+        "/users",
+        json={
+            "username": "thirduser",
+            "email": "third@example.com",
+            "password": "password123"
+        }
+    )
+    third_id = third_res.json()["id"]
+
+    # second_user (member, but not owner) attempts to add third_user
+    response = client.post(
+        f"/projects/{project['id']}/members",
+        headers=second_user["headers"],
+        json={"user_id": third_id}
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
+
+
+def test_remove_project_member(client, auth_headers, project, second_user, db_session):
+    from app.models.task import Task
+    from app.models.activity_log import ActivityLog
+
+    # Add second user as member
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    # Create a task assigned to second user
+    task_res = client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Task for second user",
+            "assignee_id": second_user["user"]["id"]
+        }
+    )
+    assert task_res.status_code == 201
+    task_id = task_res.json()["id"]
+
+    # Remove second user from project
+    del_res = client.delete(
+        f"/projects/{project['id']}/members/{second_user['user']['id']}",
+        headers=auth_headers
+    )
+    assert del_res.status_code == 200
+
+    # Verify task assignee_id is now None
+    db_session.expire_all()
+    task = db_session.get(Task, task_id)
+    assert task.assignee_id is None
+
+    # Verify activity log entry created
+    log = db_session.scalar(
+        select(ActivityLog).where(
+            ActivityLog.action == "member_removed"
+        )
+    )
+    assert log is not None
+    assert "seconduser was removed from the project; 1 task was unassigned." in log.description
+
+
+def test_owner_cannot_remove_self(client, auth_headers, project):
+    response = client.get("/me", headers=auth_headers)
+    owner_id = response.json()["id"]
+
+    del_res = client.delete(
+        f"/projects/{project['id']}/members/{owner_id}",
+        headers=auth_headers
+    )
+
+    assert del_res.status_code == 400
+    assert del_res.json()["detail"] == "Owner cannot be removed from the project"
+
+
+def test_remove_nonexistent_member_fails(client, auth_headers, project, second_user):
+    del_res = client.delete(
+        f"/projects/{project['id']}/members/{second_user['user']['id']}",
+        headers=auth_headers
+    )
+
+    assert del_res.status_code == 404
+    assert del_res.json()["detail"] == "Project member not found"

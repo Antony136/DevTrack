@@ -6,6 +6,7 @@ from app.models.task import Task
 from app.models.comment import Comment
 from app.models.activity_log import ActivityLog
 from app.models.notification import Notification
+from app.models.project_member import ProjectMember
 
 from app.database import Base, engine
 from app.routers import projects, users, tasks, comments, notifications, dashboard
