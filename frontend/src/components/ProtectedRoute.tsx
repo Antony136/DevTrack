@@ -4,7 +4,7 @@ import { Navigate, Outlet, useLocation } from "react-router-dom"
 function ProtectedRoute() {
   const location = useLocation()
   const [, setAuthVersion] = useState(0)
-  const token = localStorage.getItem("token")
+  const token = sessionStorage.getItem("token")
 
   useEffect(() => {
     const handleAuthExpired = () => {

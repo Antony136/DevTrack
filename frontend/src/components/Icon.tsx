@@ -14,13 +14,18 @@ export type IconName =
   | "filter"
   | "folder"
   | "logout"
+  | "moon"
+  | "palette"
   | "plus"
   | "refresh"
   | "search"
+  | "settings"
   | "sort"
   | "spark"
+  | "sun"
   | "tasks"
   | "trash"
+  | "type"
   | "user"
 
 interface IconProps extends SVGProps<SVGSVGElement> {
@@ -61,11 +66,29 @@ const paths: Record<IconName, ReactElement> = {
     </>
   ),
   logout: <path d="M10 17 15 12l-5-5m5 5H3m10-8h5a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-5" />,
+  moon: <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" />,
+  palette: (
+    <>
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" />
+      <circle cx="6.5" cy="9.5" r="1.5" />
+      <circle cx="9.5" cy="4" r="1.5" />
+      <circle cx="14.5" cy="4" r="1.5" />
+      <circle cx="17.5" cy="9.5" r="1.5" />
+      <circle cx="17.5" cy="14.5" r="1.5" />
+    </>
+  ),
   plus: <path d="M12 5v14M5 12h14" />,
   refresh: <path d="M20 12a8 8 0 0 1-14.9 4M4 12A8 8 0 0 1 18.9 8M19 4v4h-4M5 20v-4h4" />,
   search: <path d="m21 21-5-5m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0" />,
+  settings: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 1v6m0 6v6M4.22 4.22l4.24 4.24m3.08 3.08l4.24 4.24M1 12h6m6 0h6m-15.78 7.78l4.24-4.24m3.08-3.08l4.24-4.24M4.22 19.78l4.24-4.24m3.08-3.08l4.24-4.24" />
+    </>
+  ),
   sort: <path d="M7 4v16m0 0-3-3m3 3 3-3m7 3V4m0 0-3 3m3-3 3 3" />,
   spark: <path d="M12 3 9.5 9.5 3 12l6.5 2.5L12 21l2.5-6.5L21 12l-6.5-2.5z" />,
+  sun: <path d="M12 3v6m0 6v6M4.22 4.22l4.24 4.24m3.08 3.08l4.24 4.24M3 12h6m6 0h6m-15.78 7.78l4.24-4.24m3.08-3.08l4.24-4.24M19.78 4.22l-4.24 4.24m-3.08 3.08l-4.24 4.24" />,
   tasks: (
     <>
       <path d="M9 6h11M9 12h11M9 18h11" />
@@ -76,6 +99,11 @@ const paths: Record<IconName, ReactElement> = {
     <>
       <path d="M4 7h16" />
       <path d="M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3" />
+    </>
+  ),
+  type: (
+    <>
+      <path d="M4 7h16M6 15h12M5 11h14" />
     </>
   ),
   user: (

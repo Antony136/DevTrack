@@ -1,0 +1,12 @@
+/* ===========================
+   DevTrack - Main Stylesheet
+   =========================== */
+
+/* Import all modular CSS files */
+@import "./variables.css";
+@import "./base.css";
+@import "./layout.css";
+@import "./components.css";
+@import "./pages.css";
+@import "./utilities.css";
+@import "./responsive.css";

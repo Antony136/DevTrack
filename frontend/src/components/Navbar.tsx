@@ -89,7 +89,7 @@ function Navbar() {
   }, [location.pathname])
 
   const handleLogout = () => {
-    localStorage.removeItem("token")
+    sessionStorage.removeItem("token")
     navigate("/login", { replace: true })
   }
 
@@ -145,6 +145,15 @@ function Navbar() {
               >
                 <Icon name="user" />
                 Profile
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate("/settings")}
+                role="menuitem"
+              >
+                <Icon name="settings" />
+                Settings
               </button>
 
               <button type="button" onClick={handleLogout} role="menuitem">

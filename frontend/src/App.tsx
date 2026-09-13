@@ -14,6 +14,7 @@ import ProtectedRoute from "./components/ProtectedRoute"
 import DashboardLayout from "./layouts/DashboardLayout"
 import Notifications from "./pages/Notifications"
 import Profile from "./pages/Profile"
+import Settings from "./pages/Settings"
 
 function App() {
   return (
@@ -32,6 +33,7 @@ function App() {
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/settings" element={<Settings />} />
           </Route>
         </Route>
 

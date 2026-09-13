@@ -32,7 +32,7 @@ function Login() {
         password,
       })
 
-      localStorage.setItem("token", response.data.access_token)
+      sessionStorage.setItem("token", response.data.access_token)
       navigate("/dashboard", { replace: true })
     } catch (error) {
       setError(getErrorMessage(error, "Invalid username or password."))

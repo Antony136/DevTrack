@@ -1,0 +1,122 @@
+/* ===========================
+   CSS VARIABLES & THEME CONFIG
+   =========================== */
+
+:root {
+  /* Color Scheme: Teal (default) */
+  --primary: #2dd4bf;
+  --primary-hover: #22c5b0;
+  --primary-soft: rgba(45, 212, 191, 0.13);
+
+  /* Semantic Colors */
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.13);
+  --warning: #f59e0b;
+  --warning-soft: rgba(245, 158, 11, 0.14);
+  --danger: #f87171;
+  --danger-hover: #ef4444;
+  --danger-soft: rgba(248, 113, 113, 0.13);
+
+  /* Neutral Colors */
+  --bg: #080b10;
+  --bg-elevated: #0c1118;
+  --surface: #111822;
+  --surface-hover: #151f2b;
+  --surface-strong: #1b2634;
+
+  /* Text Colors */
+  --text: #edf2f7;
+  --text-secondary: #a9b6c6;
+  --text-muted: #758397;
+
+  /* Borders */
+  --border: #263241;
+  --border-strong: #334356;
+
+  /* Sizing */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+
+  /* Effects */
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  --transition: 180ms ease;
+
+  /* Font Sizing (medium by default) */
+  --font-scale: 1;
+  --text-xs: calc(10px * var(--font-scale));
+  --text-sm: calc(12px * var(--font-scale));
+  --text-base: calc(13px * var(--font-scale));
+  --text-md: calc(14px * var(--font-scale));
+  --text-lg: calc(15px * var(--font-scale));
+  --text-xl: calc(16px * var(--font-scale));
+  --text-2xl: calc(21px * var(--font-scale));
+  --text-3xl: calc(25px * var(--font-scale));
+  --text-4xl: calc(30px * var(--font-scale));
+
+  /* Font Family */
+  --font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  
+  /* Spacing (compact = 0.8x, normal = 1x) */
+  --spacing-scale: 1;
+}
+
+/* Compact Spacing */
+html[data-compact="true"] {
+  --spacing-scale: 0.8;
+}
+
+/* Font Families */
+html[data-font-family="system"] {
+  --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html[data-font-family="mono"] {
+  --font-family: "Monaco", "Courier New", monospace;
+}
+
+/* Light Theme */
+html[data-theme="light"] {
+  --bg: #f8f9fa;
+  --bg-elevated: #ffffff;
+  --surface: #f1f3f5;
+  --surface-hover: #e9ecef;
+  --surface-strong: #dee2e6;
+  --border: #ced4da;
+  --border-strong: #adb5bd;
+  --text: #212529;
+  --text-secondary: #495057;
+  --text-muted: #6c757d;
+}
+
+html[data-theme="light"] body {
+  background: linear-gradient(135deg, rgba(108, 117, 125, 0.05), rgba(220, 53, 69, 0.03)), #f8f9fa;
+}
+
+/* Font Size Variants */
+html[data-font-size="small"] {
+  --font-scale: 0.85;
+}
+
+html[data-font-size="large"] {
+  --font-scale: 1.15;
+}
+
+/* Color Scheme Variants */
+html[data-color-scheme="blue"] {
+  --primary: #60a5fa;
+  --primary-hover: #3b82f6;
+  --primary-soft: rgba(96, 165, 250, 0.13);
+}
+
+html[data-color-scheme="purple"] {
+  --primary: #a78bfa;
+  --primary-hover: #9333ea;
+  --primary-soft: rgba(167, 139, 250, 0.13);
+}
+
+html[data-color-scheme="emerald"] {
+  --primary: #10b981;
+  --primary-hover: #059669;
+  --primary-soft: rgba(16, 185, 129, 0.13);
+}
