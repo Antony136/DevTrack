@@ -3,8 +3,9 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_project_for_member
 from app.models.project import Project
+from app.models.project_member import ProjectMember
 from app.models.task import Task
 from app.models.user import User
 from app.schemas.task import (
@@ -31,9 +32,10 @@ def search_tasks(
 ):
     tasks = db.scalars(
         select(Task)
-        .join(Project)
+        .join(Project, Project.id == Task.project_id)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
         .where(
-            Project.owner_id == current_user.id,
+            ProjectMember.user_id == current_user.id,
             or_(
                 Task.title.ilike(f"%{q}%"),
                 Task.description.ilike(f"%{q}%")
@@ -52,21 +54,9 @@ def create_task(
     project_id: int,
     task: TaskCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    project: Project = Depends(get_project_for_member)
 ):
-    project = db.scalar(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-
-    if not project:
-        raise HTTPException(
-            status_code=404,
-            detail="Project not found"
-        )
-
     if task.assignee_id is not None:
         assignee = db.get(User, task.assignee_id)
 
@@ -74,6 +64,19 @@ def create_task(
             raise HTTPException(
                 status_code=404,
                 detail="Assignee not found"
+            )
+
+        assignee_member = db.scalar(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == task.assignee_id
+            )
+        )
+
+        if not assignee_member:
+            raise HTTPException(
+                status_code=400,
+                detail="Assignee is not a member of this project"
             )
 
     new_task = Task(
@@ -123,21 +126,8 @@ def get_tasks(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    project: Project = Depends(get_project_for_member)
 ):
-    project = db.scalar(
-        select(Project).where(
-            Project.id == project_id,
-            Project.owner_id == current_user.id
-        )
-    )
-
-    if not project:
-        raise HTTPException(
-            status_code=404,
-            detail="Project not found"
-        )
-
     query = select(Task).where(
         Task.project_id == project_id
     )
@@ -181,10 +171,11 @@ def get_task_activity(
 ):
     task = db.scalar(
         select(Task)
-        .join(Project)
+        .join(Project, Project.id == Task.project_id)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
         .where(
             Task.id == task_id,
-            Project.owner_id == current_user.id
+            ProjectMember.user_id == current_user.id
         )
     )
 
@@ -213,10 +204,11 @@ def get_task(
 ):
     task = db.scalar(
         select(Task)
-        .join(Project)
+        .join(Project, Project.id == Task.project_id)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
         .where(
             Task.id == task_id,
-            Project.owner_id == current_user.id
+            ProjectMember.user_id == current_user.id
         )
     )
 
@@ -240,10 +232,11 @@ def update_task(
 ):
     task = db.scalar(
         select(Task)
-        .join(Project)
+        .join(Project, Project.id == Task.project_id)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
         .where(
             Task.id == task_id,
-            Project.owner_id == current_user.id
+            ProjectMember.user_id == current_user.id
         )
     )
 
@@ -274,6 +267,19 @@ def update_task(
             raise HTTPException(
                 status_code=404,
                 detail="Assignee not found"
+            )
+
+        assignee_member = db.scalar(
+            select(ProjectMember).where(
+                ProjectMember.project_id == task.project_id,
+                ProjectMember.user_id == update_data["assignee_id"]
+            )
+        )
+
+        if not assignee_member:
+            raise HTTPException(
+                status_code=400,
+                detail="Assignee is not a member of this project"
             )
         
     for field, value in update_data.items():
@@ -342,7 +348,7 @@ def delete_task(
 ):
     task = db.scalar(
         select(Task)
-        .join(Project)
+        .join(Project, Project.id == Task.project_id)
         .where(
             Task.id == task_id,
             Project.owner_id == current_user.id

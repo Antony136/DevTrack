@@ -858,6 +858,12 @@ def test_task_assignment_creates_notification(
     project,
     second_user
 ):
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
     response = client.post(
         f"/projects/{project['id']}/tasks",
         headers=auth_headers,
@@ -890,6 +896,12 @@ def test_get_notifications(
     second_user
 ):
     client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    client.post(
         f"/projects/{project['id']}/tasks",
         headers=auth_headers,
         json={
@@ -916,6 +928,12 @@ def test_mark_notification_as_read(
     project,
     second_user
 ):
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
     client.post(
         f"/projects/{project['id']}/tasks",
         headers=auth_headers,
@@ -949,6 +967,12 @@ def test_user_cannot_mark_another_users_notification_as_read(
     project,
     second_user
 ):
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
     client.post(
         f"/projects/{project['id']}/tasks",
         headers=auth_headers,
@@ -1277,3 +1301,194 @@ def test_remove_nonexistent_member_fails(client, auth_headers, project, second_u
 
     assert del_res.status_code == 404
     assert del_res.json()["detail"] == "Project member not found"
+
+
+# -------------------------
+# Phase 4 — Fix Project Access
+# -------------------------
+
+def test_get_projects_returns_member_projects(client, auth_headers, project, second_user):
+    # Owner adds second_user as member to project
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    # second_user checks GET /projects
+    res = client.get("/projects", headers=second_user["headers"])
+    assert res.status_code == 200
+    projects = res.json()
+    assert len(projects) == 1
+    assert projects[0]["id"] == project["id"]
+
+
+def test_member_can_get_project_detail(client, auth_headers, project, second_user):
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    res = client.get(f"/projects/{project['id']}", headers=second_user["headers"])
+    assert res.status_code == 200
+    assert res.json()["name"] == project["name"]
+
+
+def test_owner_can_patch_project_member_cannot(client, auth_headers, project, second_user):
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    # Member attempt to patch project -> 404
+    res_member = client.patch(
+        f"/projects/{project['id']}",
+        headers=second_user["headers"],
+        json={"name": "Updated Name"}
+    )
+    assert res_member.status_code == 404
+
+    # Owner attempt to patch project -> 200
+    res_owner = client.patch(
+        f"/projects/{project['id']}",
+        headers=auth_headers,
+        json={"name": "Updated Name By Owner"}
+    )
+    assert res_owner.status_code == 200
+    assert res_owner.json()["name"] == "Updated Name By Owner"
+
+
+def test_member_cannot_delete_project(client, auth_headers, project, second_user):
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    res = client.delete(f"/projects/{project['id']}", headers=second_user["headers"])
+    assert res.status_code == 404
+
+
+# -------------------------
+# Phase 5 — Fix Task Authorization
+# -------------------------
+
+def test_member_can_create_and_view_tasks(client, auth_headers, project, second_user):
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    # Member creates task
+    create_res = client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=second_user["headers"],
+        json={"title": "Member Created Task"}
+    )
+    assert create_res.status_code == 201
+    task_id = create_res.json()["id"]
+
+    # Member views task
+    get_res = client.get(f"/tasks/{task_id}", headers=second_user["headers"])
+    assert get_res.status_code == 200
+    assert get_res.json()["title"] == "Member Created Task"
+
+    # Member lists project tasks
+    list_res = client.get(f"/projects/{project['id']}/tasks", headers=second_user["headers"])
+    assert list_res.status_code == 200
+    assert len(list_res.json()) >= 1
+
+
+def test_member_can_update_task_but_cannot_delete_task(client, auth_headers, project, second_user):
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    create_res = client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=auth_headers,
+        json={"title": "Task To Test Delete"}
+    )
+    task_id = create_res.json()["id"]
+
+    # Member updates task
+    update_res = client.patch(
+        f"/tasks/{task_id}",
+        headers=second_user["headers"],
+        json={"status": "in_progress"}
+    )
+    assert update_res.status_code == 200
+    assert update_res.json()["status"] == "in_progress"
+
+    # Member tries to delete task -> 404
+    del_res = client.delete(f"/tasks/{task_id}", headers=second_user["headers"])
+    assert del_res.status_code == 404
+
+    # Owner deletes task -> 200
+    owner_del_res = client.delete(f"/tasks/{task_id}", headers=auth_headers)
+    assert owner_del_res.status_code == 200
+
+
+# -------------------------
+# Phase 6 — Fix Task Assignment
+# -------------------------
+
+def test_task_assignment_to_non_member_fails(client, auth_headers, project, second_user):
+    # second_user is NOT a member yet
+    res = client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Task Assigned to Non-Member",
+            "assignee_id": second_user["user"]["id"]
+        }
+    )
+
+    assert res.status_code == 400
+    assert res.json()["detail"] == "Assignee is not a member of this project"
+
+
+def test_task_assignment_to_member_succeeds(client, auth_headers, project, second_user):
+    # Add second_user as member
+    client.post(
+        f"/projects/{project['id']}/members",
+        headers=auth_headers,
+        json={"user_id": second_user["user"]["id"]}
+    )
+
+    res = client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=auth_headers,
+        json={
+            "title": "Task Assigned to Member",
+            "assignee_id": second_user["user"]["id"]
+        }
+    )
+
+    assert res.status_code == 201
+    assert res.json()["assignee_id"] == second_user["user"]["id"]
+
+
+def test_update_task_assignee_to_non_member_fails(client, auth_headers, project, second_user):
+    # Create task without assignee
+    task_res = client.post(
+        f"/projects/{project['id']}/tasks",
+        headers=auth_headers,
+        json={"title": "Task For Assignee Update"}
+    )
+    task_id = task_res.json()["id"]
+
+    # Try assigning to second_user (who is not a member)
+    update_res = client.patch(
+        f"/tasks/{task_id}",
+        headers=auth_headers,
+        json={"assignee_id": second_user["user"]["id"]}
+    )
+
+    assert update_res.status_code == 400
+    assert update_res.json()["detail"] == "Assignee is not a member of this project"

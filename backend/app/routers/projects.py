@@ -8,7 +8,7 @@ from app.models.project import Project
 from app.models.project_member import ProjectMember
 from app.models.task import Task
 from app.models.user import User
-from app.schemas.project import ProjectCreate, ProjectResponse
+from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.schemas.project_member import ProjectMemberAdd, ProjectMemberResponse
 from app.utils.activity import create_activity_log
 
@@ -57,8 +57,10 @@ def get_projects(
     current_user: User = Depends(get_current_user)
 ):
     projects = db.scalars(
-        select(Project).where(
-            Project.owner_id == current_user.id
+        select(Project)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
+        .where(
+            ProjectMember.user_id == current_user.id
         )
     ).all()
 
@@ -70,8 +72,27 @@ def get_projects(
     response_model=ProjectResponse
 )
 def get_project(
+    project: Project = Depends(get_project_for_member)
+):
+    return project
+
+
+@router.patch(
+    "/projects/{project_id}",
+    response_model=ProjectResponse
+)
+def update_project(
+    project_update: ProjectUpdate,
+    db: Session = Depends(get_db),
     project: Project = Depends(get_project_owner)
 ):
+    update_data = project_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(project, field, value)
+
+    db.commit()
+    db.refresh(project)
+
     return project
 
 
